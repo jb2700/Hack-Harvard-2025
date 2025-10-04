@@ -1,6 +1,8 @@
-# Hack-Harvard-2025: Promosaic
+# Promosaic: Remix anything, anytime.
 
 "Good artists copy, great artists steal".
+
+![diagram of methodology](https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/diagram.jpg)
 
 Fulfill your wildest copy dreams! Using Segment Anything, our mobile editor makes it a breeze to edit designs in the wild. Anything, from streetpost signs to billboard advertisments, is fair game. Our powerful editor not only allows you to add text in the style of the original image, but also allows you to combine structured elements from different sources, making something that is entirely your own.
 
