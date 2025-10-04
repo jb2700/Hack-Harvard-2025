@@ -1,0 +1,90 @@
+# --- Virtual environments ---
+# Common names for virtualenv/venv
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Pytest and coverage
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Python specific binaries
+*.so
+
+# Model weights/checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Node / frontend ---
+node_modules/
+# Vite / build output
+dist/
+.build/
+.cache/
+
+# --- macOS / Windows ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# --- Project-specific generated outputs (masks / SAM outputs) ---
+# Ignore any generated SAM/rgba outputs anywhere in the tree
+**/sam_outputs/
+**/rgba_sam_outputs/
+**/sam_outputs/**
+**/rgba_sam_outputs/**
+
+# If you keep source images under backend/images, don't ignore the folder entirely.
+# But ignore common generated mask files anywhere
+**/mask_*.png
+**/mask_*_rgba.png
+
+# Large binary artifacts, databases
+*.sqlite3
+*.db
+*.sqlite
+
+# Misc
+*.bak
+*.tmp
+*.swp
+
+# Keep package lock files if you want deterministic installs; otherwise uncomment to ignore
+# package-lock.json
+# yarn.lock
