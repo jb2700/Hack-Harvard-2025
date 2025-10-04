@@ -1,214 +1,339 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount } from "svelte";
+  import { Canvas, Image } from 'fabric';
 
-  let canvas;
-  let ctx;
+  let canvasEl;
+  let fabricCanvas;
+
+  // track whether an object is selected (for enabling toolbar buttons)
+  let selectedExists = false;
+
+  // List of image URLs (returned from your backend)
   let images = [];
-  let placedImages = [];
-  let image_height;
-  let image_width;
 
-  function drawObject(index) {
-        imgObj = placedImages[index];
-        const img = new Image();
-        img.src = imgObj.url;
-        img.onload = () => {
-        ctx.drawImage(img, imgObj.x, imgObj.y, imgObj.width, imgObj.height);
-        // If this image is selected, draw border
-        if (idx === selectedIndex) {
-            ctx.strokeStyle = 'red';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(imgObj.x, imgObj.y, imgObj.width, imgObj.height);
-        }
-        };
-   }
-
-  // Drop handler
-  function handleDrop(event) {
-    event.preventDefault();
-
-    const raw = event.dataTransfer.getData('image');
-    console.log("Raw drop data:", raw);
-    if (!raw) {
-      console.warn("No image data in drop event");
-      return;
+  // Load images list from backend
+  async function fetchImages() {
+    try {
+      const resp = await fetch("http://localhost:5054/all_images");
+      const data = await resp.json();
+      // Assuming data.images is an array of filenames, e.g. ["foo.png", "bar.jpg"]
+      images = data.images.map((name) => `http://localhost:5054${name}`);
+    } catch (err) {
+      console.error("Error fetching images:", err);
     }
-    
-    const { url } = JSON.parse(raw);
-    console.log("Dropped image URL:", url);
-
-    const img = new Image();
-    img.src = url.url;
-    img.onload = () => {
-      // Compute drop position relative to canvas
-      const rect = canvas.getBoundingClientRect();
-      console.log("Canvas rect:", rect);
-      
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
-
-      placedImages.push({
-        url,
-        x: mouseX - image_width/2,
-        y: mouseY - image_height/2,
-        width: image_width,
-        height: image_height
-      });
-
-
-      console.log(`Drawing image at (${mouseX}, ${mouseY}) with size (${image_width}, ${image_height})`);
-
-      ctx.drawImage(img, mouseX - image_width/2, mouseY - image_height/2, image_width, image_height);
-    };
-    img.onerror = (err) => {
-      console.error("Error loading image at drop:", url, err);
-    };
   }
 
-    function handleClick(event) {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = event.clientX - rect.left;
-        const mouseY = event.clientY - rect.top;
-        console.log("Canvas click at:", mouseX, mouseY);
+  // Add a new image object to the canvas (default position or specified)
+  function addImageToCanvas(url, opts = {}) {
+    // Load via an HTMLImageElement and construct a Fabric Image instance.
+    // This avoids the deprecated Image.fromURL static helper.
+    const imgEl = new window.Image();
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.onload = () => {
+      try {
+        // Create Fabric image
+        const fImg = new Image(imgEl, Object.assign({
+          left: opts.left ?? 100,
+          top: opts.top ?? 100,
+          originX: 'center',
+          originY: 'center',
+          selectable: true,
+          hasControls: true,
+          hasBorders: true,
+        }, opts));
 
-        // Find topmost image under this point
-        // Iterate from end to start so that more recently placed (on top) are tested first
-        for (let i = placedImages.length - 1; i >= 0; i--) {
-            const obj = placedImages[i];
-            console.log(`Checking image ${i} at (${obj.x}, ${obj.y}) with size (${obj.width}, ${obj.height})`);
-            if (
-                mouseX >= obj.x &&
-                mouseX <= obj.x + obj.width &&
-                mouseY >= obj.y &&
-                mouseY <= obj.y + obj.height
-            ) {
-                ctx.strokeStyle = 'red';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
-                return;
-            }
+        // If drag supplied a thumbnail display size, scale the Fabric image to match that display size
+        if (opts.thumbSize && imgEl.naturalWidth && imgEl.naturalHeight) {
+          const { w: thumbW, h: thumbH } = opts.thumbSize;
+          // compute scale factors for width and height
+          const scaleX = thumbW / imgEl.naturalWidth;
+          const scaleY = thumbH / imgEl.naturalHeight;
+          // choose uniform scale to preserve aspect ratio
+          const scale = Math.min(scaleX || scaleY, scaleY || scaleX) || 1;
+          fImg.scale(scale);
         }
+
+        fabricCanvas.add(fImg);
+        fabricCanvas.setActiveObject(fImg);
+        fabricCanvas.requestRenderAll();
+      } catch (err) {
+        console.error('Error creating Fabric Image from element:', err);
+      }
+    };
+    imgEl.onerror = (err) => {
+      console.error('Failed to load image for canvas:', url, err);
+    };
+    imgEl.src = url;
+  }
+
+  // Helper used when user clicks a thumbnail (capture display size)
+  function addFromThumbnail(e, url) {
+    // find the image element inside the button (if any)
+    let imgEl = null;
+    if (e.currentTarget) imgEl = e.currentTarget.querySelector && e.currentTarget.querySelector('img');
+    const thumbW = imgEl ? imgEl.clientWidth : undefined;
+    const thumbH = imgEl ? imgEl.clientHeight : undefined;
+    addImageToCanvas(url, { thumbSize: thumbW && thumbH ? { w: thumbW, h: thumbH } : undefined });
+  }
+
+  // Drag-and-drop handlers for thumbnails -> canvas
+  function handleDragStart(e, url) {
+    try {
+      // set multiple types for wider browser compatibility
+      e.dataTransfer.setData('text/plain', url);
+      e.dataTransfer.setData('text/uri-list', url);
+      // capture thumbnail element size so we can add the image to canvas at same display size
+      let imgEl = null;
+      if (e.target && e.target.tagName === 'IMG') imgEl = e.target;
+      else if (e.currentTarget) imgEl = e.currentTarget.querySelector && e.currentTarget.querySelector('img');
+      const thumbW = imgEl ? imgEl.clientWidth : 100;
+      const thumbH = imgEl ? imgEl.clientHeight : 100;
+      e.dataTransfer.setData('application/thumb-size', JSON.stringify({ w: thumbW, h: thumbH }));
+      console.debug('dragstart set data:', url, { w: thumbW, h: thumbH });
+      // create an offscreen canvas sized to the thumbnail to use as the drag image (so preview matches)
+      try {
+        const tmp = document.createElement('canvas');
+        tmp.width = thumbW;
+        tmp.height = thumbH;
+        const ctx = tmp.getContext('2d');
+        // draw the visible thumbnail into canvas (imgEl is loaded)
+        if (imgEl) ctx.drawImage(imgEl, 0, 0, thumbW, thumbH);
+        e.dataTransfer.setDragImage(tmp, Math.floor(thumbW / 2), Math.floor(thumbH / 2));
+      } catch (err) {
+        // fallback to native drag image
+        const dragImg = new window.Image();
+        dragImg.src = url;
+        e.dataTransfer.setDragImage(dragImg, 30, 30);
+      }
+    } catch (err) {
+      // fallback
+      e.dataTransfer.setData('text/plain', url);
     }
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    // try multiple types for compatibility
+    const url = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
+    console.debug('drop received:', url);
+    if (!url) return;
+    // try to read thumbnail size sent on dragstart
+    let thumbSize = null;
+    try {
+      const raw = e.dataTransfer.getData('application/thumb-size');
+      if (raw) thumbSize = JSON.parse(raw);
+    } catch (err) { /* ignore */ }
+    // Use Fabric's pointer translation so it accounts for canvas transforms/zoom
+    let pointer;
+    try {
+      pointer = fabricCanvas.getPointer(e);
+    } catch (err) {
+      const rect = canvasEl.getBoundingClientRect();
+      pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+    addImageToCanvas(url, { left: pointer.x, top: pointer.y, thumbSize });
+  }
+
+  // Toolbar actions
+  function bringToFront() {
+    const obj = fabricCanvas.getActiveObject();
+    if (obj) {
+      obj.bringToFront();
+      fabricCanvas.requestRenderAll();
+    }
+  }
+
+  function sendToBack() {
+    const obj = fabricCanvas.getActiveObject();
+    if (obj) {
+      obj.sendToBack();
+      fabricCanvas.requestRenderAll();
+    }
+  }
+
+  function bringForward() {
+    const obj = fabricCanvas.getActiveObject();
+    if (obj) {
+      obj.bringForward();
+      fabricCanvas.requestRenderAll();
+    }
+  }
+
+  function sendBackwards() {
+    const obj = fabricCanvas.getActiveObject();
+    if (obj) {
+      obj.sendBackwards();
+      fabricCanvas.requestRenderAll();
+    }
+  }
+
+  function duplicateObject() {
+    const obj = fabricCanvas.getActiveObject();
+    if (!obj) return;
+    obj.clone((cloned) => {
+      cloned.set({ left: obj.left + 20, top: obj.top + 20 });
+      fabricCanvas.add(cloned);
+      fabricCanvas.setActiveObject(cloned);
+      fabricCanvas.requestRenderAll();
+    });
+  }
+
+  function deleteActive() {
+    const obj = fabricCanvas.getActiveObject();
+    if (obj) {
+      fabricCanvas.remove(obj);
+      fabricCanvas.requestRenderAll();
+    }
+  }
 
   onMount(async () => {
-    ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Initialize fabric canvas
+    // Initialize Fabric.js canvas
+    fabricCanvas = new Canvas(canvasEl, {
+        width: 800,
+        height: 600,
+        backgroundColor: '#ffffff',
+    });
 
-    const response = await fetch('http://localhost:5054/all_images');
-    console.log("Response:", response);
-    const data = await response.json();
-    // images = data.images;
-    images = data.images.map(image => ({
-        url: `http://localhost:5054${image}`,
-        name: image
-    }));
-    
-    console.log("Fetched images:", images);
+    fabricCanvas.renderAll();
+    // Fetch the images from backend
+    await fetchImages();
+    // Optionally add them initially:
+    // images.forEach((url) => {
+    //   // You could choose not to add all at once, but as user drags them
+    //   // For demo, I'll add them:
+    //   addImageToCanvas(url);
+    // });
 
-    canvas.addEventListener('drop', handleDrop);
-    canvas.addEventListener('dragover', (e) => e.preventDefault());
-    canvas.addEventListener('click', handleClick);
+    // Handle delete key
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const obj = fabricCanvas.getActiveObject();
+        if (obj) {
+          fabricCanvas.remove(obj);
+        }
+      }
+    });
+
+    // Manage selection state and optionally bring a clicked object to front
+    fabricCanvas.on("selection:created", (e) => {
+      const obj = e.target;
+      selectedExists = !!obj;
+      if (obj) {
+        // optionally bring selected to front so it's on top while editing
+        // obj.bringToFront();
+        fabricCanvas.requestRenderAll();
+      }
+    });
+
+    fabricCanvas.on("selection:updated", (e) => {
+      const obj = e.target;
+      selectedExists = !!obj;
+      if (obj) {
+        // obj.bringToFront();
+        fabricCanvas.requestRenderAll();
+      }
+    });
+
+    fabricCanvas.on('selection:cleared', () => {
+      selectedExists = false;
+    });
   });
-
-  const handleDragStart = (event, url) => {
-    // Set the serialized data for drop logic
-    event.dataTransfer.setData('image', JSON.stringify({ url }));
-    console.log("Drag started for image:", url);
-
-    // Create an image element to serve as the drag preview
-    const dragImg = new Image();
-    dragImg.src = url;
-    console.log("event start:", event);
-    image_width = event.srcElement.clientWidth;
-    image_height = event.srcElement.clientHeight;
-  };
-
-  const clearCanvas = () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    placedImages = [];
-  };
-
-  const drawRectangle = () => {
-    ctx.fillStyle = 'blue';
-    ctx.fillRect(50, 50, 200, 150);
-  };
 </script>
 
 <style>
   .editor-container {
     display: flex;
     height: 100vh;
+    align-items: center;
   }
-
   .tools {
     width: 200px;
     background-color: #f4f4f4;
     padding: 10px;
     border-right: 1px solid #ddd;
+    align-self: center;
   }
-
+  .toolbar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .tool-btn {
+    font-size: 12px;
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    background: white;
+    cursor: pointer;
+  }
+  .tool-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
   .canvas-container {
     flex-grow: 1;
     display: flex;
     justify-content: center;
     align-items: center;
     background-color: white;
+    margin-left: 12px;
   }
-
   canvas {
     border: 1px solid #ccc;
-    cursor: crosshair;
   }
-
-  .tool-button {
-    margin-bottom: 10px;
-    padding: 8px 16px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    width: 100%;
-  }
-
-  .tool-button:hover {
-    background-color: #0056b3;
-  }
-
   .image-thumbnail {
     margin-bottom: 10px;
-    text-align: center;
-  }
-
-  .image-thumbnail img {
-    max-width: 100%;
-    height: auto;
     cursor: pointer;
+  }
+  .image-thumbnail img {
+    max-width: 100px;
+    height: auto;
   }
 </style>
 
 <div class="editor-container">
   <div class="tools">
-    <button class="tool-button" on:click={clearCanvas}>Clear Canvas</button>
-    <button class="tool-button" on:click={drawRectangle}>Draw Rectangle</button>
     <h3>Uploaded Images</h3>
-    {#each images as image}
+    <div class="toolbar" role="toolbar" aria-label="Object actions">
+      <button class="tool-btn" type="button" on:click={bringToFront} disabled={!selectedExists}>Bring to front</button>
+      <button class="tool-btn" type="button" on:click={sendToBack} disabled={!selectedExists}>Send to back</button>
+      <button class="tool-btn" type="button" on:click={bringForward} disabled={!selectedExists}>Bring forward</button>
+      <button class="tool-btn" type="button" on:click={sendBackwards} disabled={!selectedExists}>Send back</button>
+      <button class="tool-btn" type="button" on:click={duplicateObject} disabled={!selectedExists}>Duplicate</button>
+      <button class="tool-btn" type="button" on:click={deleteActive} disabled={!selectedExists}>Delete</button>
+    </div>
+    {#each images as url}
+      <!-- Use a button for accessibility (keyboard focus + click) and make it draggable on the image -->
       <button
         class="image-thumbnail"
+        type="button"
         draggable="true"
-        on:dragstart={(e) => handleDragStart(e, image)}
-        aria-label={`Drag ${image} to canvas`}
+        on:click={(e) => addFromThumbnail(e, url)}
+        on:dragstart={(e) => { e.dataTransfer.effectAllowed = 'copy'; handleDragStart(e, url); }}
       >
-        <img src={image.url} alt={image.name} />
-        <p>{image.name}</p> 
+        <img
+          src={url}
+          alt="Uploaded thumbnail"
+          draggable="true"
+          on:dragstart={(e) => { e.dataTransfer.effectAllowed = 'copy'; handleDragStart(e, url); }}
+        />
       </button>
     {/each}
+    <p>Click a thumbnail to add to canvas.</p>
   </div>
 
-  <div class="canvas-container">
-    <canvas bind:this={canvas} width="800" height="600"></canvas>
+  <div class="canvas-container" role="application" aria-label="Canvas drop area" on:dragover={handleDragOver} on:drop={handleDrop}>
+    <canvas
+      bind:this={canvasEl}
+      width="800"
+      height="600"
+      aria-label="Fabric editing canvas"
+    ></canvas>
   </div>
 </div>
