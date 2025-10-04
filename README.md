@@ -1,26 +1,19 @@
-# Hack-Harvard-2025: Promosaic
+# Promosaic: Remix anything, anytime.
 
 "Good artists copy, great artists steal".
 
-Fulfill your wildest copy dreams! Using Segment Anything, our mobile editor makes it a breeze to edit designs in the wild. Anything, from streetpost signs to billboard advertisments, is fair game. Our powerful editor not only allows you to add text in the style of the original image, but also allows you to combine structured elements from different sources, making something that is entirely your own.
+![diagram of methodology](https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/diagram.jpg)
 
-	1.	Image preprocessing
-	•	Detect edges, bounding boxes, align orientation
-	•	Segment into regions: text blocks, images, backgrounds
-	2.	Element classification
-	•	Use OCR to detect text, fonts
-	•	Label boxes: headings, subheadings, body text, image, decoration
-	3.	Style extraction
-	•	Extract color palette, gradients, textures, border styles
-	•	Infer margins, spacing, alignment rules
-	4.	Template generation
-	•	Create a vector / layout template (SVG, JSON) with placeholder boxes matching the structure
-	•	Assign style attributes (colors, fonts) to those placeholder boxes
-	5.	User edit / refinement UI
-	•	Let user tweak placement, swap fonts, adjust spacing
-	•	Export final design (SVG, PDF, etc.)
-	6.	Template reuse
-	•	Save the generated template for future use
+Our project reimagines how people can capture, remix, and reuse the designs that surround them every day. Using Meta’s Segment Anything Model, we built an editor that makes it effortless to transform “designs in the wild”—whether it’s a vinyl sticker, a flyer taped to a pole, or a massive billboard—into reusable creative material. Instead of simply copying, our tool lets you extract structure, preserve style, and generate entirely new designs that blend elements from multiple sources.
+
+Here’s how it works:
+	1.	Image preprocessing: Using the state-of-the-art Segment Anything model, we transform photos of graphics and text -- in nearly any setting, with varying illuminations, angles, and orientation -- into clean masked outlines.
+	2.	Element classification: Using PyTesseract and font classification algorithms, we identify text and font details, while regions are labeled as headings, body text, images, or decorations.
+	3.	Style extraction: We try to pull the design’s “feel”—its color palette, gradients, textures, borders, margins, spacing, and alignment rules.
+	4.	Template generation: With a reusable vector template (SVG/JSON), we align placeholders and style attributes aligned to the original. 
+	5.	User interface: Through our editor, you can tweak placements, swap fonts, or adjust spacing, and export a polished output as PDF. This means you can easily swap in elements from different input sources, like stickers or text decals!
+
+By bridging machine learning, computer vision, and design, our tool empowers anyone to engage with their cultural environment as both consumer and creator. Flyers on a street corner or stickers on a laptop no longer just advertise—they become living artifacts, remixable and generative in shaping new cultural expression.
 
 This also uses `mps` for faster runtime on Mac. Please also download the MPS patch from here:
 
