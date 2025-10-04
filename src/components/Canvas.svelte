@@ -16,13 +16,10 @@
 
   // Add a new image object to the canvas (default position or specified)
   function addImageToCanvas(url, opts = {}) {
-    // Load via an HTMLImageElement and construct a Fabric Image instance.
-    // This avoids the deprecated Image.fromURL static helper.
     const imgEl = new window.Image();
     imgEl.crossOrigin = 'anonymous';
     imgEl.onload = () => {
       try {
-        // Create Fabric image
         const fImg = new FabricImage(imgEl, Object.assign({
           left: opts.left ?? 100,
           top: opts.top ?? 100,
@@ -33,15 +30,15 @@
           hasBorders: true,
         }, opts));
 
-        // If drag supplied a thumbnail display size, scale the Fabric image to match that display size
-        if (opts.thumbSize && imgEl.naturalWidth && imgEl.naturalHeight) {
+        if (opts.scale && typeof opts.scale === 'number') {
+          // modern Fabric uses scaleX/scaleY properties
+          fImg.set({ scaleX: opts.scale, scaleY: opts.scale });
+        } else if (opts.thumbSize && imgEl.naturalWidth && imgEl.naturalHeight) {
           const { w: thumbW, h: thumbH } = opts.thumbSize;
-          // compute scale factors for width and height
           const scaleX = thumbW / imgEl.naturalWidth;
           const scaleY = thumbH / imgEl.naturalHeight;
-          // choose uniform scale to preserve aspect ratio
           const scale = Math.min(scaleX || scaleY, scaleY || scaleX) || 1;
-          fImg.scale(scale);
+          fImg.set({ scaleX: scale, scaleY: scale });
         }
 
         fabricCanvas.add(fImg);
@@ -58,69 +55,16 @@
   }
 
 
-  // Helper used when user clicks a thumbnail (capture display size)
-  function addFromThumbnail(e, url) {
-    // find the image element inside the button (if any)
-    let imgEl = null;
-    if (e.currentTarget) imgEl = e.currentTarget.querySelector && e.currentTarget.querySelector('img');
-    const thumbW = imgEl ? imgEl.clientWidth : undefined;
-    const thumbH = imgEl ? imgEl.clientHeight : undefined;
-    addImageToCanvas(url, { thumbSize: thumbW && thumbH ? { w: thumbW, h: thumbH } : undefined });
-  }
-
-  // Drag-and-drop handlers for thumbnails -> canvas
-  function handleDragStart(e, url) {
-    try {
-      // set multiple types for wider browser compatibility
-      e.dataTransfer.setData('text/plain', url);
-      e.dataTransfer.setData('text/uri-list', url);
-      // capture thumbnail element size so we can add the image to canvas at same display size
-      let imgEl = null;
-      if (e.target && e.target.tagName === 'IMG') imgEl = e.target;
-      else if (e.currentTarget) imgEl = e.currentTarget.querySelector && e.currentTarget.querySelector('img');
-      const thumbW = imgEl ? imgEl.clientWidth : 100;
-      const thumbH = imgEl ? imgEl.clientHeight : 100;
-      e.dataTransfer.setData('application/thumb-size', JSON.stringify({ w: thumbW, h: thumbH }));
-      console.debug('dragstart set data:', url, { w: thumbW, h: thumbH });
-      // create an offscreen canvas sized to the thumbnail to use as the drag image (so preview matches)
-      try {
-        const tmp = document.createElement('canvas');
-        tmp.width = thumbW;
-        tmp.height = thumbH;
-        const ctx = tmp.getContext('2d');
-        // draw the visible thumbnail into canvas (imgEl is loaded)
-        if (imgEl) ctx.drawImage(imgEl, 0, 0, thumbW, thumbH);
-        e.dataTransfer.setDragImage(tmp, Math.floor(thumbW / 2), Math.floor(thumbH / 2));
-      } catch (err) {
-        // fallback to native drag image
-        const dragImg = new window.Image();
-        dragImg.src = url;
-        e.dataTransfer.setDragImage(dragImg, 30, 30);
-      }
-    } catch (err) {
-      // fallback
-      e.dataTransfer.setData('text/plain', url);
-    }
-  }
+  // Note: thumbnail click/drag helpers were removed in favor of TreeView/Folder drag handlers.
 
   function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }
-
   function handleDrop(e) {
     e.preventDefault();
-    // try multiple types for compatibility
-    const url = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-    console.debug('drop received:', url);
-    if (!url) return;
-    // try to read thumbnail size sent on dragstart
-    let thumbSize = null;
-    try {
-      const raw = e.dataTransfer.getData('application/thumb-size');
-      if (raw) thumbSize = JSON.parse(raw);
-    } catch (err) { /* ignore */ }
-    // Use Fabric's pointer translation so it accounts for canvas transforms/zoom
+
+    // compute pointer in canvas coords
     let pointer;
     try {
       pointer = fabricCanvas.getPointer(e);
@@ -128,6 +72,35 @@
       const rect = canvasEl.getBoundingClientRect();
       pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     }
+
+    // If a folder composite drag was started, the Folder component stored the structured payload
+    // in a temporary global `window.__folderDragPayload` (set by onTreeDrag when the TreeView forwarded the folder drag).
+    const folderPayload = window.__folderDragPayload || null;
+    if (folderPayload && folderPayload.items && folderPayload.items.length) {
+      const scale = folderPayload.scale || 1;
+      const baseX = pointer.x;
+      const baseY = pointer.y;
+      // Place each child at relative position: pointer + (child.bbox - folder.bbox) * scale
+      for (const child of folderPayload.items) {
+        const cb = child.bbox || { x: 0, y: 0 };
+        const fx = baseX + ((cb.x || 0) - (folderPayload.bbox?.x || 0)) * scale;
+        const fy = baseY + ((cb.y || 0) - (folderPayload.bbox?.y || 0)) * scale;
+        // child.url is expected to be the cropped full-resolution data URL
+        addImageToCanvas(child.url, { left: fx, top: fy, scale });
+      }
+      // clear the temporary payload
+      window.__folderDragPayload = null;
+      return;
+    }
+
+    // Fallback: single-image drop
+    const url = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
+    if (!url) return;
+    let thumbSize = null;
+    try {
+      const raw = e.dataTransfer.getData('application/thumb-size');
+      if (raw) thumbSize = JSON.parse(raw);
+    } catch (err) { /* ignore */ }
     addImageToCanvas(url, { left: pointer.x, top: pointer.y, thumbSize });
   }
 
@@ -197,15 +170,22 @@
     const { event, item } = e.detail;
     // prepare dataTransfer similarly to handleDragStart
     try {
-      const url = item.url;
-      event.dataTransfer.setData('text/plain', url);
-      event.dataTransfer.setData('text/uri-list', url);
-      const thumbW = 100, thumbH = 100;
-      event.dataTransfer.setData('application/thumb-size', JSON.stringify({ w: thumbW, h: thumbH }));
-      // try to set drag image
-      const dragImg = new window.Image();
-      dragImg.src = item.thumb || url;
-      event.dataTransfer.setDragImage(dragImg, 30, 30);
+      if (item && item.type === 'folder') {
+        // stash the full folder payload for the eventual drop
+        window.__folderDragPayload = item;
+        // attach a minimal text fallback
+        try { event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'folder', name: item.name })); } catch(_){}
+        // the Folder component already set application/folder-composite and drag image
+      } else {
+        const url = item.url;
+        event.dataTransfer.setData('text/plain', url);
+        event.dataTransfer.setData('text/uri-list', url);
+        const thumbW = 100, thumbH = 100;
+        event.dataTransfer.setData('application/thumb-size', JSON.stringify({ w: thumbW, h: thumbH }));
+        const dragImg = new window.Image();
+        dragImg.src = item.thumb || url;
+        event.dataTransfer.setDragImage(dragImg, 30, 30);
+      }
     } catch (err) {
       console.warn('onTreeDrag failed to set dataTransfer', err);
     }
