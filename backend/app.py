@@ -12,9 +12,13 @@ RGBA_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
 
+
+
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
+
+CORS(app, origins=["http://localhost:5173"])
 
 
 def allowed_file(filename):
@@ -46,5 +50,12 @@ def serve_rgba(filename):
     return send_from_directory(str(RGBA_DIR), filename)
 
 
+@app.route("/all_images", methods=["GET"])
+def list_images():
+    files = [f.name for f in UPLOAD_DIR.iterdir() if f.is_file() and allowed_file(f.name)]
+    image_urls = [f"/images/{file}" for file in files]
+    print("Here are the image URLs:", image_urls)
+    return jsonify({"images": image_urls})
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5050)
+    app.run(debug=True, port=5054)
