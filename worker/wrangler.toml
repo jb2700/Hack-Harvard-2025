@@ -1,0 +1,9 @@
+name = "inpaint-worker"
+type = "javascript"
+
+# Bind Workers AI
+[ai]
+binding = "AI"
+
+[build]
+upload_format = "service-worker"
