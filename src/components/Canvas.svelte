@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { Canvas, Image } from 'fabric';
+  import { Canvas, Image as FabricImage } from 'fabric';
 
   let canvasEl;
   let fabricCanvas;
@@ -10,18 +10,9 @@
 
   // List of image URLs (returned from your backend)
   let images = [];
+  let groups = [];
+  let openGroups = {};
 
-  // Load images list from backend
-  async function fetchImages() {
-    try {
-      const resp = await fetch("http://localhost:5054/all_images");
-      const data = await resp.json();
-      // Assuming data.images is an array of filenames, e.g. ["foo.png", "bar.jpg"]
-      images = data.images.map((name) => `http://localhost:5054${name}`);
-    } catch (err) {
-      console.error("Error fetching images:", err);
-    }
-  }
 
   // Add a new image object to the canvas (default position or specified)
   function addImageToCanvas(url, opts = {}) {
@@ -32,7 +23,7 @@
     imgEl.onload = () => {
       try {
         // Create Fabric image
-        const fImg = new Image(imgEl, Object.assign({
+  const fImg = new FabricImage(imgEl, Object.assign({
           left: opts.left ?? 100,
           top: opts.top ?? 100,
           originX: 'center',
@@ -65,6 +56,7 @@
     };
     imgEl.src = url;
   }
+
 
   // Helper used when user clicks a thumbnail (capture display size)
   function addFromThumbnail(e, url) {
@@ -192,24 +184,125 @@
   }
 
   onMount(async () => {
-    // Initialize fabric canvas
-    // Initialize Fabric.js canvas
     fabricCanvas = new Canvas(canvasEl, {
-        width: 800,
-        height: 600,
+        width: 500,
+        height: 800,
         backgroundColor: '#ffffff',
     });
 
     fabricCanvas.renderAll();
-    // Fetch the images from backend
-    await fetchImages();
-    // Optionally add them initially:
-    // images.forEach((url) => {
-    //   // You could choose not to add all at once, but as user drags them
-    //   // For demo, I'll add them:
-    //   addImageToCanvas(url);
-    // });
 
+    const response = await fetch('http://localhost:5054/all_images');
+    console.log("Response:", response);
+    const data = await response.json();
+    console.log("Fetched image data:", data);
+    console.log(data.images);
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+
+    const loaded = await Promise.all(
+      data.images.map(async (imagePath) => {
+        const url = imagePath;
+        const parts = imagePath.split('/').filter(Boolean);
+        const filename = parts.length ? parts[parts.length - 1] : imagePath;
+        const parent = parts.length > 1 ? parts[parts.length - 2] : '';
+        const name = parent ? `${parent}/${filename}` : filename;
+
+        // load the image (use window.Image to avoid shadowing the Fabric Image import)
+        const img = new window.Image();
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+
+        await new Promise((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = (e) => reject(e);
+        });
+
+        // size the temp canvas to image natural size
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        tempCanvas.width = iw;
+        tempCanvas.height = ih;
+
+        // draw and read pixels
+        tempCtx.clearRect(0, 0, iw, ih);
+        tempCtx.drawImage(img, 0, 0, iw, ih);
+        const imageData = tempCtx.getImageData(0, 0, iw, ih).data;
+
+        // find tight bbox of pixels with alpha > 0
+        let minX = iw, minY = ih, maxX = -1, maxY = -1;
+        for (let y = 0; y < ih; y++) {
+          for (let x = 0; x < iw; x++) {
+            const idx = (y * iw + x) * 4;
+            const alpha = imageData[idx + 3];
+            if (alpha > 0) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+
+        // If fully transparent, fall back to full image bounds
+        if (maxX === -1) {
+          minX = 0; minY = 0; maxX = Math.max(0, iw - 1); maxY = Math.max(0, ih - 1);
+        }
+
+        const bbox = {
+          x: minX,
+          y: minY,
+          width: maxX - minX + 1,
+          height: maxY - minY + 1,
+        };
+        console.log(`Image ${name} bbox:`, bbox);
+
+        // create a cropped thumbnail DataURL for compact display in the sidebar
+        const maxThumb = 120; // max pixels on longest side for thumbnail
+        // draw cropped region into a temporary canvas
+        const cropCanvas = document.createElement('canvas');
+        const cropCtx = cropCanvas.getContext('2d');
+        cropCanvas.width = bbox.width;
+        cropCanvas.height = bbox.height;
+        // draw the image offset so the bbox region fills the crop canvas
+        cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+        cropCtx.drawImage(img, -bbox.x, -bbox.y, iw, ih);
+
+        // scale if needed
+        let thumbDataUrl;
+        if (Math.max(bbox.width, bbox.height) > maxThumb) {
+          const scale = maxThumb / Math.max(bbox.width, bbox.height);
+          const sw = Math.max(1, Math.round(bbox.width * scale));
+          const sh = Math.max(1, Math.round(bbox.height * scale));
+          const scaleCanvas = document.createElement('canvas');
+          scaleCanvas.width = sw;
+          scaleCanvas.height = sh;
+          const sctx = scaleCanvas.getContext('2d');
+          sctx.drawImage(cropCanvas, 0, 0, bbox.width, bbox.height, 0, 0, sw, sh);
+          thumbDataUrl = scaleCanvas.toDataURL('image/png');
+        } else {
+          thumbDataUrl = cropCanvas.toDataURL('image/png');
+        }
+
+        return { url, name, naturalWidth: iw, naturalHeight: ih, bbox, thumb: thumbDataUrl };
+      })
+    );
+
+    images = loaded; // each item: { url, name, naturalWidth, naturalHeight, bbox, thumb }
+    console.log("Fetched images with bbox:", images);
+
+    // group images by the first path segment (folder), e.g. 'IMG_0430_L/mask_027_rgba.png'
+    const groupsMap = new Map();
+    images.forEach(img => {
+      const parts = img.name.split('/').filter(Boolean);
+      const groupName = parts.length > 1 ? parts[0] : '_ungrouped';
+      if (!groupsMap.has(groupName)) groupsMap.set(groupName, []);
+      groupsMap.get(groupName).push(img);
+    });
+
+    groups = Array.from(groupsMap.entries()).map(([groupName, items]) => ({ groupName, items }));
+    // initialize open state (closed by default)
+    openGroups = Object.fromEntries(groups.map(g => [g.groupName, false]));
     // Handle delete key
     window.addEventListener("keydown", (e) => {
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -244,62 +337,65 @@
       selectedExists = false;
     });
   });
+
 </script>
 
 <style>
   .editor-container {
     display: flex;
     height: 100vh;
-    align-items: center;
   }
+
   .tools {
-    width: 200px;
+    width: 30vw;
     background-color: #f4f4f4;
     padding: 10px;
     border-right: 1px solid #ddd;
-    align-self: center;
   }
-  .toolbar {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-  .tool-btn {
-    font-size: 12px;
-    padding: 6px 8px;
-    border: 1px solid #ccc;
-    background: white;
-    cursor: pointer;
-  }
-  .tool-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+
   .canvas-container {
+    width: 60vw;
     flex-grow: 1;
     display: flex;
     justify-content: center;
     align-items: center;
     background-color: white;
-    margin-left: 12px;
   }
+
   canvas {
     border: 1px solid #ccc;
+    cursor: crosshair;
   }
+
+  .tool-button {
+    margin-bottom: 10px;
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  .tool-button:hover {
+    background-color: #0056b3;
+  }
+
   .image-thumbnail {
     margin-bottom: 10px;
-    cursor: pointer;
+    text-align: center;
   }
+
   .image-thumbnail img {
-    max-width: 100px;
+    max-width: 100%;
     height: auto;
+    cursor: pointer;
   }
 </style>
 
 <div class="editor-container">
   <div class="tools">
-    <h3>Uploaded Images</h3>
     <div class="toolbar" role="toolbar" aria-label="Object actions">
       <button class="tool-btn" type="button" on:click={bringToFront} disabled={!selectedExists}>Bring to front</button>
       <button class="tool-btn" type="button" on:click={sendToBack} disabled={!selectedExists}>Send to back</button>
@@ -308,31 +404,44 @@
       <button class="tool-btn" type="button" on:click={duplicateObject} disabled={!selectedExists}>Duplicate</button>
       <button class="tool-btn" type="button" on:click={deleteActive} disabled={!selectedExists}>Delete</button>
     </div>
-    {#each images as url}
-      <!-- Use a button for accessibility (keyboard focus + click) and make it draggable on the image -->
-      <button
-        class="image-thumbnail"
-        type="button"
-        draggable="true"
-        on:click={(e) => addFromThumbnail(e, url)}
-        on:dragstart={(e) => { e.dataTransfer.effectAllowed = 'copy'; handleDragStart(e, url); }}
-      >
-        <img
-          src={url}
-          alt="Uploaded thumbnail"
-          draggable="true"
-          on:dragstart={(e) => { e.dataTransfer.effectAllowed = 'copy'; handleDragStart(e, url); }}
-        />
-      </button>
+    <h3>Uploaded Images</h3>
+    {#each groups as group}
+      <div>
+        <button
+          type="button"
+          class="group-header"
+          aria-expanded={openGroups[group.groupName]}
+          on:click={() => { openGroups[group.groupName] = !openGroups[group.groupName]; openGroups = { ...openGroups }; }}
+        >
+          <strong>{group.groupName}</strong>
+          <span class="count">{group.items.length}</span>
+          <span class="caret">{openGroups[group.groupName] ? '▾' : '▸'}</span>
+        </button>
+        {#if openGroups[group.groupName]}
+          <div class="group-items">
+            {#each group.items as image}
+              <button
+                class="image-thumbnail"
+                draggable="true"
+                on:dragstart={(e) => handleDragStart(e, image.url)}
+                aria-label={`Drag ${image.name} to canvas`}
+                on:click={(e) => addFromThumbnail(e, image.url)}
+              >
+                <img src={image.thumb} alt={image.name} />
+                <p>{image.name}</p>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/each}
-    <p>Click a thumbnail to add to canvas.</p>
   </div>
 
   <div class="canvas-container" role="application" aria-label="Canvas drop area" on:dragover={handleDragOver} on:drop={handleDrop}>
     <canvas
       bind:this={canvasEl}
-      width="800"
-      height="600"
+      width="500"
+      height="800"
       aria-label="Fabric editing canvas"
     ></canvas>
   </div>
