@@ -35,8 +35,10 @@ def call_cf_inpaint(worker_url: str, api_key: str, image: Image.Image, mask: Ima
 
 if __name__ == "__main__":
     # Example usage
-    worker_url = "https://your-worker-domain.example.workers.dev"
-    api_key = "YOUR_SECRET_API_KEY"  # route this in Cloudflare so Worker only accepts valid requests
+    worker_url = "https://hackharvard3.julian-beaudry.workers.dev"
+    api_key = "newnewTok"  # route this in Cloudflare so Worker only accepts valid requests
+    # api_key = "yJcstjDte0pdZwHFe1SGKHzLQX8KyN1R5DifzB31"
+    # api_key = ""
     # load image & mask
     image = Image.open("input.png").convert("RGB")
     mask = Image.open("mask.png").convert("L")
