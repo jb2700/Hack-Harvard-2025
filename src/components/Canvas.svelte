@@ -23,7 +23,7 @@
     imgEl.onload = () => {
       try {
         // Create Fabric image
-  const fImg = new FabricImage(imgEl, Object.assign({
+        const fImg = new FabricImage(imgEl, Object.assign({
           left: opts.left ?? 100,
           top: opts.top ?? 100,
           originX: 'center',
@@ -257,34 +257,41 @@
         };
         console.log(`Image ${name} bbox:`, bbox);
 
-        // create a cropped thumbnail DataURL for compact display in the sidebar
-        const maxThumb = 120; // max pixels on longest side for thumbnail
-        // draw cropped region into a temporary canvas
+        // create a cropped image that contains ONLY the object bbox (full resolution)
         const cropCanvas = document.createElement('canvas');
         const cropCtx = cropCanvas.getContext('2d');
-        cropCanvas.width = bbox.width;
-        cropCanvas.height = bbox.height;
-        // draw the image offset so the bbox region fills the crop canvas
+        // ensure at least 1x1
+        const cropW = Math.max(1, bbox.width);
+        const cropH = Math.max(1, bbox.height);
+        cropCanvas.width = cropW;
+        cropCanvas.height = cropH;
+        // draw the image offset so the bbox region fills the crop canvas (this yields a full-resolution cropped image)
         cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
         cropCtx.drawImage(img, -bbox.x, -bbox.y, iw, ih);
 
-        // scale if needed
+        // This is the full-resolution cropped data URL (used as the actual image source for the canvas)
+        const fullCroppedDataUrl = cropCanvas.toDataURL('image/png');
+
+        // create a thumbnail DataURL for compact display in the sidebar (possibly scaled down)
+        const maxThumb = 120; // max pixels on longest side for thumbnail
         let thumbDataUrl;
-        if (Math.max(bbox.width, bbox.height) > maxThumb) {
-          const scale = maxThumb / Math.max(bbox.width, bbox.height);
-          const sw = Math.max(1, Math.round(bbox.width * scale));
-          const sh = Math.max(1, Math.round(bbox.height * scale));
+        if (Math.max(cropW, cropH) > maxThumb) {
+          const scale = maxThumb / Math.max(cropW, cropH);
+          const sw = Math.max(1, Math.round(cropW * scale));
+          const sh = Math.max(1, Math.round(cropH * scale));
           const scaleCanvas = document.createElement('canvas');
           scaleCanvas.width = sw;
           scaleCanvas.height = sh;
           const sctx = scaleCanvas.getContext('2d');
-          sctx.drawImage(cropCanvas, 0, 0, bbox.width, bbox.height, 0, 0, sw, sh);
+          sctx.drawImage(cropCanvas, 0, 0, cropW, cropH, 0, 0, sw, sh);
           thumbDataUrl = scaleCanvas.toDataURL('image/png');
         } else {
-          thumbDataUrl = cropCanvas.toDataURL('image/png');
+          thumbDataUrl = fullCroppedDataUrl;
         }
 
-        return { url, name, naturalWidth: iw, naturalHeight: ih, bbox, thumb: thumbDataUrl };
+        // Return the cropped full-resolution data URL as `url` so the canvas adds the minimal image.
+        // naturalWidth/naturalHeight refer to the cropped region's original resolution.
+        return { url: fullCroppedDataUrl, name, naturalWidth: cropW, naturalHeight: cropH, bbox, thumb: thumbDataUrl };
       })
     );
 
