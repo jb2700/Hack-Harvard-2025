@@ -1,0 +1,43 @@
+{
+  "groups": [
+    {
+      "id": "3",
+      "label": "text",
+      "elements": [
+        "mask_080.png"
+      ]
+    },
+    {
+      "id": "6",
+      "label": "text",
+      "elements": [
+        "mask_016.png"
+      ]
+    },
+    {
+      "id": "9",
+      "label": "text",
+      "elements": [
+        "mask_058.png"
+      ]
+    },
+    {
+      "id": "10",
+      "label": "headline",
+      "elements": [
+        "mask_000.png",
+        "mask_002.png",
+        "mask_006.png",
+        "mask_014.png",
+        "mask_043.png",
+        "mask_052.png",
+        "mask_058.png",
+        "mask_062.png",
+        "mask_066.png",
+        "mask_067.png",
+        "mask_072.png",
+        "mask_074.png"
+      ]
+    }
+  ]
+}
