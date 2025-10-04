@@ -1,7 +1,8 @@
 name = "inpaint-worker"
 type = "javascript"
 
-# Bind Workers AI
+compatibility_date = "2025-10-04"
+
 [ai]
 binding = "AI"
 
