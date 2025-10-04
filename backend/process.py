@@ -28,6 +28,27 @@ def get_masks(img):
     masks_arr = [m["segmentation"] for m in masks]
     return masks
 
+def write_masks(masks, out_dir, img_rgb):
+        """Write mask outputs into out_dir.
+        For each mask we write:
+            - mask_{i:03d}_rgba.png: RGBA image where pixels inside the mask keep the
+                original image RGB values and alpha=255; outside pixels are transparent.
+            - mask_{i:03d}_color.png: a colorful solid fill for the mask area (alpha=255)
+        """
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for i, m in enumerate(masks):
+            seg = m["segmentation"].astype(bool)
+            h, w = seg.shape
+
+            # RGBA masked original: keep original colors where mask is True
+            rgba = np.zeros((h, w, 4), dtype=np.uint8)
+            # img_rgb is expected shape (H, W, 3) and RGB ordering
+            rgba[seg, :3] = img_rgb[seg]
+            rgba[seg, 3] = 255
+            Image.fromarray(rgba).save(out_dir / f"mask_{i:03d}_rgba.png")
+
+        print('saved outputs to ', out_dir)
+
 #helper function for group masks_by_text
 def detect_text_boxes(img_rgb):
     """Return list of bounding boxes (x,y,w,h) for text regions.
@@ -81,59 +102,53 @@ def downscale_image(img, max_dim=1600):
         img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
     return img
 
+def save_masks_for_image(img_filename):
+    # Prefer the original high-res image if present, otherwise use downscaled
+    down_path = ROOT / "images" / "input" / "downscaled" / img_filename
+    load_path = down_path
+
+
+    img_rgb = np.array(Image.open(load_path).convert("RGB"))
+    masks = get_masks(img_rgb)
+
+    out_dir = OUT_RGBA_DIR / img_filename.rstrip(".jpeg")
+    write_masks(masks, out_dir, img_rgb)
+    groups = group_masks_by_text(img_rgb, masks)
+    if groups:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with open(out_dir / "groups.json", "w") as f:
+            json.dump({"groups": groups}, f, indent=2)
+        print(f"Wrote groups.json with {len(groups)} groups")
+        
 def main():
     INPUT_DIR = ROOT / "images" / "input"
-    OUTPUT_DIR = ROOT / "images" / "cropped"
-    OUTPUT_DIR.mkdir(exist_ok=True)
     OUT_RGBA_DIR.mkdir(exist_ok=True)
 
-    # Process all images in input directory
-    # for image_path in INPUT_DIR.glob("*"):
+    # original_dir = INPUT_DIR / "original"
+    # downscaled_dir = INPUT_DIR / "downscaled"
+    # downscaled_dir.mkdir(exist_ok=True)
+
+    # for image_path in original_dir.glob("*"):
     #     if image_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
-    #         print(f"Processing {image_path.name}...")
-    #         img = np.array(Image.open(image_path).convert("RGB"))
+    #         print(f"Downscaling {image_path.name}...")
+    #         img = downscale_image(np.array(Image.open(image_path).convert("RGB")))
+    #         # Save downscaled image
+    #         output_path = downscaled_dir / image_path.name
+    #         img.save(output_path, quality=100)
 
-    #         # STEP 1: Crop image to rectangle. Apply quadrilateral detection and cropping
-    #         cropped_img = affine_crop(img, image_path)
-    #         # Save cropped image
-    #         output_path = OUTPUT_DIR / f"cropped_{image_path.name}"
-    #         Image.fromarray(cropped_img).save(output_path)
-
-    # Downscale images in original folder
-    original_dir = INPUT_DIR / "original"
-    downscaled_dir = INPUT_DIR / "downscaled"
-    downscaled_dir.mkdir(exist_ok=True)
-
-    for image_path in original_dir.glob("*"):
-        if image_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
-            print(f"Downscaling {image_path.name}...")
-            img = downscale_image(np.array(Image.open(image_path).convert("RGB")))
-            # Save downscaled image
-            output_path = downscaled_dir / image_path.name
-            img.save(output_path, quality=100)
-
+    save_masks_for_image("IMG_0451.jpeg")
     image_filename = None
     if (image_filename != None):
-        img = np.array(Image.open(downscaled_dir / image_filename).convert("RGB"))
-        #Mask generation
-        masks = get_masks(img)
-        for i, m in enumerate(masks):
-            seg_bool = m["segmentation"].astype(bool)
-            # save RGBA with transparent outside, original pixels inside.
-            rgba = np.zeros((img.shape[0], img.shape[1], 4), dtype=np.uint8)
-            rgba[:, :, :3] = img
-            rgba[:, :, 3] = (seg_bool.astype(np.uint8) * 255)
-            # Create folder based on original filename
-            img_name = Path(image_filename).stem
-            img_folder = OUT_RGBA_DIR / img_name
-            img_folder.mkdir(exist_ok=True)
-            Image.fromarray(rgba).save(img_folder / f"mask_{i:03d}_rgba.png")
-        print("Saved outputs to", OUT_RGBA_DIR)
-        groups = group_masks_by_text(img, masks)
-        if groups:
-            with open(OUT_RGBA_DIR / img_name /"groups.json", "w") as f:
-                json.dump({"groups": groups}, f, indent=2)
-            print(f"Wrote groups.json with {len(groups)} groups")
+        pass
+        # img = np.array(Image.open(downscaled_dir / image_filename).convert("RGB"))
+        # #Mask generation
+        # masks = get_masks(img)
+        # write_masks(masks, OUT_RGBA_DIR / image_filename.rstrip(".png"))
+        # groups = group_masks_by_text(img, masks)
+        # if groups:
+        #     with open(OUT_RGBA_DIR / image_filename /"groups.json", "w") as f:
+        #         json.dump({"groups": groups}, f, indent=2)
+        #     print(f"Wrote groups.json with {len(groups)} groups")
 
 if __name__ == "__main__":
     main()

@@ -42,31 +42,27 @@ def upload_image():
         return jsonify({"error": "no selected file"}), 400
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
+
+        #1: WRITE REGULAR IMAGE
         out_dir = UPLOAD_DIR / "input" / "original"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / filename
-
-        # Read file bytes (don't rely on file.stream position after save)
         file_bytes = file.read()
         if not file_bytes:
             return jsonify({"error": "empty file"}), 400
-
-        # Write the original file bytes to disk
         with open(out_path, "wb") as f:
             f.write(file_bytes)
 
-        # Decode image from bytes and create downscaled version
+        #2: WRITE DOWNSCALED IMAGE
         arr = np.frombuffer(file_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"error": "could not decode image"}), 400
-
-        # ensure downscale dir exists (create parents)
         DOWNSCALE_DIR.mkdir(parents=True, exist_ok=True)
         img_small = downscale_image(img)
         cv2.imwrite(str(DOWNSCALE_DIR / filename), img_small)
 
-        # Return the URL path relative to the /images endpoint
+        #3: START PROCESS_FILE
         rel_url = f"/images/input/original/{filename}"
         return jsonify({"filename": filename, "url": rel_url})
     return jsonify({"error": "invalid file type"}), 400

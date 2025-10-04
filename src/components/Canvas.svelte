@@ -4,6 +4,8 @@
   let canvas;
   let ctx;
   let images = [];
+  let groups = [];
+  let openGroups = {};
   let placedImages = [];
   let image_height;
   let image_width;
@@ -34,7 +36,6 @@
       return;
     }
     const payload = JSON.parse(raw);
-    // payload expected shape: { url: string, bbox: {x,y,width,height}, naturalWidth, naturalHeight, name }
     const srcUrl = payload.url || (payload.url && payload.url.url);
     const bbox = payload.bbox || { x: 0, y: 0, width: payload.naturalWidth || 100, height: payload.naturalHeight || 100 };
 
@@ -46,7 +47,6 @@
       const rect = canvas.getBoundingClientRect();
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
-
       // Determine display size: prefer the thumbnail drag size (image_width/height) if set,
       // otherwise use bbox size scaled down to a reasonable max.
       let w = image_width || bbox.width;
@@ -57,8 +57,7 @@
         w = Math.round(w * s);
         h = Math.round(h * s);
       }
-
-      // Store placed image with bbox metadata so we can draw the cropped region later
+      //natural width and height of the image
       placedImages.push({
         url: srcUrl,
         name: payload.name,
@@ -71,7 +70,6 @@
         height: h
       });
 
-      // draw only the cropped bbox region from the source image into the canvas
       ctx.drawImage(
         img,
         bbox.x,
@@ -213,8 +211,21 @@
       })
     );
 
-    images = loaded; // each item: { url, name, naturalWidth, naturalHeight, bbox }
+    images = loaded; // each item: { url, name, naturalWidth, naturalHeight, bbox, thumb }
     console.log("Fetched images with bbox:", images);
+
+    // group images by the first path segment (folder), e.g. 'IMG_0430_L/mask_027_rgba.png'
+    const groupsMap = new Map();
+    images.forEach(img => {
+      const parts = img.name.split('/').filter(Boolean);
+      const groupName = parts.length > 1 ? parts[0] : '_ungrouped';
+      if (!groupsMap.has(groupName)) groupsMap.set(groupName, []);
+      groupsMap.get(groupName).push(img);
+    });
+
+    groups = Array.from(groupsMap.entries()).map(([groupName, items]) => ({ groupName, items }));
+    // initialize open state (closed by default)
+    openGroups = Object.fromEntries(groups.map(g => [g.groupName, false]));
 
     canvas.addEventListener('drop', handleDrop);
     canvas.addEventListener('dragover', (e) => e.preventDefault());
@@ -320,16 +331,29 @@
     <button class="tool-button" on:click={clearCanvas}>Clear Canvas</button>
     <button class="tool-button" on:click={drawRectangle}>Draw Rectangle</button>
     <h3>Uploaded Images</h3>
-    {#each images as image}
-      <button
-        class="image-thumbnail"
-        draggable="true"
-        on:dragstart={(e) => handleDragStart(e, image)}
-        aria-label={`Drag ${image} to canvas`}
-      >
-        <img src={image.thumb} alt={image.name} />
-        <p>{image.name}</p> 
-      </button>
+    {#each groups as group}
+      <div class="group">
+        <div class="group-header" on:click={() => { openGroups[group.groupName] = !openGroups[group.groupName]; openGroups = { ...openGroups }; }}>
+          <strong>{group.groupName}</strong>
+          <span class="count">{group.items.length}</span>
+          <span class="caret">{openGroups[group.groupName] ? '▾' : '▸'}</span>
+        </div>
+        {#if openGroups[group.groupName]}
+          <div class="group-items">
+            {#each group.items as image}
+              <button
+                class="image-thumbnail"
+                draggable="true"
+                on:dragstart={(e) => handleDragStart(e, image)}
+                aria-label={`Drag ${image.name} to canvas`}
+              >
+                <img src={image.thumb} alt={image.name} />
+                <p>{image.name}</p>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/each}
   </div>
 
