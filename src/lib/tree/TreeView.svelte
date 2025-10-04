@@ -6,18 +6,27 @@
   const dispatch = createEventDispatcher();
 
   function buildTree(items) {
+    // root map of folderName -> { __children: Map, __files: [] }
     const root = new Map();
+    // helper root entry to hold files at root level
+    const rootEntry = { __children: root, __files: [] };
+
     for (const it of items) {
       const parts = it.name.split('/').filter(Boolean);
-      let node = root;
-      for (let i = 0; i < parts.length; i++) {
+      // current map and entry start at root
+      let nodeMap = root;
+      let currentEntry = rootEntry;
+
+      // iterate only up to parent folder (exclude the last segment which is the filename)
+      for (let i = 0; i < Math.max(0, parts.length - 1); i++) {
         const part = parts[i];
-        const isFile = i === parts.length - 1;
-        if (!node.has(part)) node.set(part, { __children: new Map(), __files: [] });
-        const entry = node.get(part);
-        if (isFile) entry.__files.push(it);
-        node = entry.__children;
+        if (!nodeMap.has(part)) nodeMap.set(part, { __children: new Map(), __files: [] });
+        currentEntry = nodeMap.get(part);
+        nodeMap = currentEntry.__children;
       }
+
+      // push the file item into the parent folder's __files
+      currentEntry.__files.push(it);
     }
 
     function toArray(map) {

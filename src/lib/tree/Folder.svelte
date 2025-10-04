@@ -44,7 +44,7 @@
   }
   .file-entry:hover { background: rgba(0,0,0,0.02); }
   .thumb { width: 48px; height: auto; border: 1px solid #ddd; }
-  .filename { font-size: 12px; }
+  .file-entry .filename { font-size: 12px; }
 </style>
 
 <div>
@@ -65,7 +65,6 @@
       {#each node.files as file}
   <button class="file-entry" type="button" draggable="true" on:dragstart={(e) => onFileDragStart(e, file)} on:click={() => onFileClick(file)}>
           <img src={file.thumb} alt={file.name} class="thumb" />
-          <div class="filename">{file.name}</div>
         </button>
       {/each}
     </div>

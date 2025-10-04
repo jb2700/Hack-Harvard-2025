@@ -310,8 +310,6 @@
           thumbDataUrl = fullCroppedDataUrl;
         }
 
-        // Return the cropped full-resolution data URL as `url` so the canvas adds the minimal image.
-        // naturalWidth/naturalHeight refer to the cropped region's original resolution.
         return { url: fullCroppedDataUrl, name, naturalWidth: cropW, naturalHeight: cropH, bbox, thumb: thumbDataUrl };
       })
   );
