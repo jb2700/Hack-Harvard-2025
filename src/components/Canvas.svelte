@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { Canvas, Image as FabricImage } from 'fabric';
+  import TreeView from '../lib/tree/TreeView.svelte';
 
   let canvasEl;
   let fabricCanvas;
@@ -10,8 +11,7 @@
 
   // List of image URLs (returned from your backend)
   let images = [];
-  let groups = [];
-  let openGroups = {};
+  let loading = true;
 
 
   // Add a new image object to the canvas (default position or specified)
@@ -183,6 +183,55 @@
     }
   }
 
+  // Handlers for TreeView events
+  function onTreeOpen(e) {
+    const item = e.detail.item;
+    // open = click: add image to canvas
+    if (item && item.url) {
+      addImageToCanvas(item.url, { thumbSize: { w: 100, h: 100 } });
+    }
+  }
+
+  function onTreeDrag(e) {
+    // e.detail.event is the original dragstart event
+    const { event, item } = e.detail;
+    // prepare dataTransfer similarly to handleDragStart
+    try {
+      const url = item.url;
+      event.dataTransfer.setData('text/plain', url);
+      event.dataTransfer.setData('text/uri-list', url);
+      const thumbW = 100, thumbH = 100;
+      event.dataTransfer.setData('application/thumb-size', JSON.stringify({ w: thumbW, h: thumbH }));
+      // try to set drag image
+      const dragImg = new window.Image();
+      dragImg.src = item.thumb || url;
+      event.dataTransfer.setDragImage(dragImg, 30, 30);
+    } catch (err) {
+      console.warn('onTreeDrag failed to set dataTransfer', err);
+    }
+  }
+
+  function getBBox(imageData, iw, ih) {
+    let minX = iw, minY = ih, maxX = 0, maxY = 0;
+    for (let y = 0; y < ih; y++) {
+      for (let x = 0; x < iw; x++) {
+        const idx = (y * iw + x) * 4;
+        const alpha = imageData[idx + 3];
+        if (alpha > 0) { // non-transparent pixel
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    // Handle case where no non-transparent pixels found
+    if (maxX < minX || maxY < minY) {
+      return { x: 0, y: 0, width: 1, height: 1 };
+    }
+    return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+  }
+
   onMount(async () => {
     fabricCanvas = new Canvas(canvasEl, {
         width: 500,
@@ -204,9 +253,7 @@
       data.images.map(async (imagePath) => {
         const url = imagePath;
         const parts = imagePath.split('/').filter(Boolean);
-        const filename = parts.length ? parts[parts.length - 1] : imagePath;
-        const parent = parts.length > 1 ? parts[parts.length - 2] : '';
-        const name = parent ? `${parent}/${filename}` : filename;
+        const name = imagePath;
 
         // load the image (use window.Image to avoid shadowing the Fabric Image import)
         const img = new window.Image();
@@ -229,35 +276,9 @@
         tempCtx.drawImage(img, 0, 0, iw, ih);
         const imageData = tempCtx.getImageData(0, 0, iw, ih).data;
 
-        // find tight bbox of pixels with alpha > 0
-        let minX = iw, minY = ih, maxX = -1, maxY = -1;
-        for (let y = 0; y < ih; y++) {
-          for (let x = 0; x < iw; x++) {
-            const idx = (y * iw + x) * 4;
-            const alpha = imageData[idx + 3];
-            if (alpha > 0) {
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
-          }
-        }
-
-        // If fully transparent, fall back to full image bounds
-        if (maxX === -1) {
-          minX = 0; minY = 0; maxX = Math.max(0, iw - 1); maxY = Math.max(0, ih - 1);
-        }
-
-        const bbox = {
-          x: minX,
-          y: minY,
-          width: maxX - minX + 1,
-          height: maxY - minY + 1,
-        };
+        let bbox = getBBox(imageData, iw, ih)
         console.log(`Image ${name} bbox:`, bbox);
 
-        // create a cropped image that contains ONLY the object bbox (full resolution)
         const cropCanvas = document.createElement('canvas');
         const cropCtx = cropCanvas.getContext('2d');
         // ensure at least 1x1
@@ -272,8 +293,8 @@
         // This is the full-resolution cropped data URL (used as the actual image source for the canvas)
         const fullCroppedDataUrl = cropCanvas.toDataURL('image/png');
 
-        // create a thumbnail DataURL for compact display in the sidebar (possibly scaled down)
-        const maxThumb = 120; // max pixels on longest side for thumbnail
+        // create a thumbnail DataURL for sidebar display
+        const maxThumb = 120;
         let thumbDataUrl;
         if (Math.max(cropW, cropH) > maxThumb) {
           const scale = maxThumb / Math.max(cropW, cropH);
@@ -293,24 +314,14 @@
         // naturalWidth/naturalHeight refer to the cropped region's original resolution.
         return { url: fullCroppedDataUrl, name, naturalWidth: cropW, naturalHeight: cropH, bbox, thumb: thumbDataUrl };
       })
-    );
+  );
 
-    images = loaded; // each item: { url, name, naturalWidth, naturalHeight, bbox, thumb }
-    console.log("Fetched images with bbox:", images);
+  console.log(loaded)
 
-    // group images by the first path segment (folder), e.g. 'IMG_0430_L/mask_027_rgba.png'
-    const groupsMap = new Map();
-    images.forEach(img => {
-      const parts = img.name.split('/').filter(Boolean);
-      const groupName = parts.length > 1 ? parts[0] : '_ungrouped';
-      if (!groupsMap.has(groupName)) groupsMap.set(groupName, []);
-      groupsMap.get(groupName).push(img);
-    });
+  // populate images for the UI
+  images = loaded;
+  loading = false;
 
-    groups = Array.from(groupsMap.entries()).map(([groupName, items]) => ({ groupName, items }));
-    // initialize open state (closed by default)
-    openGroups = Object.fromEntries(groups.map(g => [g.groupName, false]));
-    // Handle delete key
     window.addEventListener("keydown", (e) => {
       if (e.key === "Delete" || e.key === "Backspace") {
         const obj = fabricCanvas.getActiveObject();
@@ -374,7 +385,8 @@
     cursor: crosshair;
   }
 
-  .tool-button {
+
+  .tool-btn {
     margin-bottom: 10px;
     padding: 8px 16px;
     background-color: #007bff;
@@ -385,20 +397,11 @@
     width: 100%;
   }
 
-  .tool-button:hover {
+  .tool-btn:hover {
     background-color: #0056b3;
   }
 
-  .image-thumbnail {
-    margin-bottom: 10px;
-    text-align: center;
-  }
-
-  .image-thumbnail img {
-    max-width: 100%;
-    height: auto;
-    cursor: pointer;
-  }
+  /* removed unused .image-thumbnail and .tool-button styles */
 </style>
 
 <div class="editor-container">
@@ -412,36 +415,11 @@
       <button class="tool-btn" type="button" on:click={deleteActive} disabled={!selectedExists}>Delete</button>
     </div>
     <h3>Uploaded Images</h3>
-    {#each groups as group}
-      <div>
-        <button
-          type="button"
-          class="group-header"
-          aria-expanded={openGroups[group.groupName]}
-          on:click={() => { openGroups[group.groupName] = !openGroups[group.groupName]; openGroups = { ...openGroups }; }}
-        >
-          <strong>{group.groupName}</strong>
-          <span class="count">{group.items.length}</span>
-          <span class="caret">{openGroups[group.groupName] ? '▾' : '▸'}</span>
-        </button>
-        {#if openGroups[group.groupName]}
-          <div class="group-items">
-            {#each group.items as image}
-              <button
-                class="image-thumbnail"
-                draggable="true"
-                on:dragstart={(e) => handleDragStart(e, image.url)}
-                aria-label={`Drag ${image.name} to canvas`}
-                on:click={(e) => addFromThumbnail(e, image.url)}
-              >
-                <img src={image.thumb} alt={image.name} />
-                <p>{image.name}</p>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/each}
+    {#if loading}
+      <div>Loading images…</div>
+    {:else}
+  <TreeView items={images} on:drag={(e) => onTreeDrag(e)} on:open={(e) => onTreeOpen(e)} />
+    {/if}
   </div>
 
   <div class="canvas-container" role="application" aria-label="Canvas drop area" on:dragover={handleDragOver} on:drop={handleDrop}>

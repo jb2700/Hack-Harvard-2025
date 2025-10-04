@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 import cv2
 from helper import affine_crop, portrait
+import shutil
 
 #requires pytesseract installation through brew or similar package manager
 import pytesseract
@@ -102,11 +103,13 @@ def downscale_image(img, max_dim=1600):
         img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
     return img
 
+
+# For each group, create prefixed copies of mask files so it's easy to
+# identify which masks belong to which text box. Prefix uses the
+# text_box top-left coordinates: "{x}_{y}_mask_###_rgba.png".
 def save_masks_for_image(img_filename):
-    # Prefer the original high-res image if present, otherwise use downscaled
     down_path = ROOT / "images" / "input" / "downscaled" / img_filename
     load_path = down_path
-
 
     img_rgb = np.array(Image.open(load_path).convert("RGB"))
     masks = get_masks(img_rgb)
@@ -114,11 +117,31 @@ def save_masks_for_image(img_filename):
     out_dir = OUT_RGBA_DIR / img_filename.rstrip(".jpeg")
     write_masks(masks, out_dir, img_rgb)
     groups = group_masks_by_text(img_rgb, masks)
+
     if groups:
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(out_dir / "groups.json", "w") as f:
             json.dump({"groups": groups}, f, indent=2)
+            
         print(f"Wrote groups.json with {len(groups)} groups")
+        for g in groups:
+            tb = g.get('text_box', None)
+            if not tb:
+                continue
+            x, y = tb[0], tb[1]
+            prefix = f"{x}_{y}"
+            group_dir = out_dir / prefix
+            group_dir.mkdir(parents=True, exist_ok=True)
+            for mi in g.get('mask_indices', []):
+                src = out_dir / f"mask_{mi:03d}_rgba.png"
+                if src.exists():
+                    dst = group_dir / f"mask_{mi:03d}_rgba.png"
+                    # avoid overwriting existing file
+                    if not dst.exists():
+                        try:
+                            shutil.copy2(src, dst)
+                        except Exception as e:
+                            print(f"Failed to copy {src} -> {dst}: {e}")
         
 def main():
     INPUT_DIR = ROOT / "images" / "input"

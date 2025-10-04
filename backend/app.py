@@ -85,8 +85,7 @@ def list_images():
         if f.is_file() and allowed_file(f.name):
             rel = f.relative_to(UPLOAD_DIR).as_posix()
             files.append(f"/images/{rel}")
-
-    #print("Here are the sam_shapes image URLs:", files)
+    print("Here are the sam_shapes image URLs:", files)
     return jsonify({"images": files})
 
 if __name__ == "__main__":
