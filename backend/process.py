@@ -73,6 +73,14 @@ def group_masks_by_text(img, masks):
             })
     return groups
     
+def downscale_image(img, max_dim=1600):
+    height, width = img.shape[:2]
+    if max(height, width) > max_dim:
+        scale = max_dim / max(height, width)
+        new_size = (int(width * scale), int(height * scale))
+        img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+    return img
+
 def main():
     INPUT_DIR = ROOT / "images" / "input"
     OUTPUT_DIR = ROOT / "images" / "cropped"
@@ -99,13 +107,7 @@ def main():
     for image_path in original_dir.glob("*"):
         if image_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
             print(f"Downscaling {image_path.name}...")
-            img = Image.open(image_path) #will open landscape
-            width, height = img.size
-            if width > 1600:
-                new_width = 1600
-                new_height = int(height * (new_width / width))
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                img = img.rotate(-90, expand=True)
+            img = downscale_image(np.array(Image.open(image_path).convert("RGB")))
             # Save downscaled image
             output_path = downscaled_dir / image_path.name
             img.save(output_path, quality=100)

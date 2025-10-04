@@ -33,35 +33,59 @@
       console.warn("No image data in drop event");
       return;
     }
-    
-    const { url } = JSON.parse(raw);
-    console.log("Dropped image URL:", url);
+    const payload = JSON.parse(raw);
+    // payload expected shape: { url: string, bbox: {x,y,width,height}, naturalWidth, naturalHeight, name }
+    const srcUrl = payload.url || (payload.url && payload.url.url);
+    const bbox = payload.bbox || { x: 0, y: 0, width: payload.naturalWidth || 100, height: payload.naturalHeight || 100 };
 
     const img = new Image();
-    img.src = url.url;
+    img.crossOrigin = 'anonymous';
+    img.src = srcUrl;
     img.onload = () => {
       // Compute drop position relative to canvas
       const rect = canvas.getBoundingClientRect();
-      console.log("Canvas rect:", rect);
-      
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
 
+      // Determine display size: prefer the thumbnail drag size (image_width/height) if set,
+      // otherwise use bbox size scaled down to a reasonable max.
+      let w = image_width || bbox.width;
+      let h = image_height || bbox.height;
+      const maxDisplay = 300;
+      if (Math.max(w, h) > maxDisplay) {
+        const s = maxDisplay / Math.max(w, h);
+        w = Math.round(w * s);
+        h = Math.round(h * s);
+      }
+
+      // Store placed image with bbox metadata so we can draw the cropped region later
       placedImages.push({
-        url,
-        x: mouseX - image_width/2,
-        y: mouseY - image_height/2,
-        width: image_width,
-        height: image_height
+        url: srcUrl,
+        name: payload.name,
+        bbox,
+        naturalWidth: payload.naturalWidth,
+        naturalHeight: payload.naturalHeight,
+        x: mouseX - w / 2,
+        y: mouseY - h / 2,
+        width: w,
+        height: h
       });
 
-
-      console.log(`Drawing image at (${mouseX}, ${mouseY}) with size (${image_width}, ${image_height})`);
-
-      ctx.drawImage(img, mouseX - image_width/2, mouseY - image_height/2, image_width, image_height);
+      // draw only the cropped bbox region from the source image into the canvas
+      ctx.drawImage(
+        img,
+        bbox.x,
+        bbox.y,
+        bbox.width,
+        bbox.height,
+        mouseX - w / 2,
+        mouseY - h / 2,
+        w,
+        h
+      );
     };
     img.onerror = (err) => {
-      console.error("Error loading image at drop:", url, err);
+      console.error("Error loading image at drop:", srcUrl, err);
     };
   }
 
@@ -95,33 +119,133 @@
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const response = await fetch('http://localhost:5054/all_images');
+    const response = await fetch('/all_images');
     console.log("Response:", response);
     const data = await response.json();
-    // images = data.images;
-    images = data.images.map(image => ({
-        url: `http://localhost:5054${image}`,
-        name: image
-    }));
-    
-    console.log("Fetched images:", images);
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+
+    const loaded = await Promise.all(
+      data.images.map(async (imagePath) => {
+        const url = imagePath;
+        const parts = imagePath.split('/').filter(Boolean);
+        const filename = parts.length ? parts[parts.length - 1] : imagePath;
+        const parent = parts.length > 1 ? parts[parts.length - 2] : '';
+        const name = parent ? `${parent}/${filename}` : filename;
+
+        // load the image
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+
+        await new Promise((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = (e) => reject(e);
+        });
+
+        // size the temp canvas to image natural size
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        tempCanvas.width = iw;
+        tempCanvas.height = ih;
+
+        // draw and read pixels
+        tempCtx.clearRect(0, 0, iw, ih);
+        tempCtx.drawImage(img, 0, 0, iw, ih);
+        const imageData = tempCtx.getImageData(0, 0, iw, ih).data;
+
+        // find tight bbox of pixels with alpha > 0
+        let minX = iw, minY = ih, maxX = -1, maxY = -1;
+        for (let y = 0; y < ih; y++) {
+          for (let x = 0; x < iw; x++) {
+            const idx = (y * iw + x) * 4;
+            const alpha = imageData[idx + 3];
+            if (alpha > 0) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+
+        // If fully transparent, fall back to full image bounds
+        if (maxX === -1) {
+          minX = 0; minY = 0; maxX = Math.max(0, iw - 1); maxY = Math.max(0, ih - 1);
+        }
+
+        const bbox = {
+          x: minX,
+          y: minY,
+          width: maxX - minX + 1,
+          height: maxY - minY + 1,
+        };
+        console.log(`Image ${name} bbox:`, bbox);
+
+        // create a cropped thumbnail DataURL for compact display in the sidebar
+        const maxThumb = 120; // max pixels on longest side for thumbnail
+        // draw cropped region into a temporary canvas
+        const cropCanvas = document.createElement('canvas');
+        const cropCtx = cropCanvas.getContext('2d');
+        cropCanvas.width = bbox.width;
+        cropCanvas.height = bbox.height;
+        // draw the image offset so the bbox region fills the crop canvas
+        cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+        cropCtx.drawImage(img, -bbox.x, -bbox.y, iw, ih);
+
+        // scale if needed
+        let thumbDataUrl;
+        if (Math.max(bbox.width, bbox.height) > maxThumb) {
+          const scale = maxThumb / Math.max(bbox.width, bbox.height);
+          const sw = Math.max(1, Math.round(bbox.width * scale));
+          const sh = Math.max(1, Math.round(bbox.height * scale));
+          const scaleCanvas = document.createElement('canvas');
+          scaleCanvas.width = sw;
+          scaleCanvas.height = sh;
+          const sctx = scaleCanvas.getContext('2d');
+          sctx.drawImage(cropCanvas, 0, 0, bbox.width, bbox.height, 0, 0, sw, sh);
+          thumbDataUrl = scaleCanvas.toDataURL('image/png');
+        } else {
+          thumbDataUrl = cropCanvas.toDataURL('image/png');
+        }
+
+        return { url, name, naturalWidth: iw, naturalHeight: ih, bbox, thumb: thumbDataUrl };
+      })
+    );
+
+    images = loaded; // each item: { url, name, naturalWidth, naturalHeight, bbox }
+    console.log("Fetched images with bbox:", images);
 
     canvas.addEventListener('drop', handleDrop);
     canvas.addEventListener('dragover', (e) => e.preventDefault());
     canvas.addEventListener('click', handleClick);
   });
 
-  const handleDragStart = (event, url) => {
-    // Set the serialized data for drop logic
-    event.dataTransfer.setData('image', JSON.stringify({ url }));
-    console.log("Drag started for image:", url);
+  const handleDragStart = (event, image) => {
+    // include bbox and natural sizes in the drag payload
+    const payload = {
+      url: image.url,
+      name: image.name,
+      bbox: image.bbox,
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+    };
+    event.dataTransfer.setData('image', JSON.stringify(payload));
+    console.log("Drag started for image:", payload);
 
-    // Create an image element to serve as the drag preview
+    // set a drag preview using the cropped thumbnail if available
     const dragImg = new Image();
-    dragImg.src = url;
-    console.log("event start:", event);
-    image_width = event.srcElement.clientWidth;
-    image_height = event.srcElement.clientHeight;
+    dragImg.src = image.thumb || image.url;
+    // try to set drag image; browser may not show custom preview if not loaded
+    try {
+      event.dataTransfer.setDragImage(dragImg, 16, 16);
+    } catch (e) {
+      // ignore if browser prevents custom drag image
+    }
+
+    // record the thumbnail element size as a suggested placement size
+    image_width = event.srcElement.clientWidth || Math.min(200, image.bbox.width);
+    image_height = event.srcElement.clientHeight || Math.min(200, image.bbox.height);
   };
 
   const clearCanvas = () => {
@@ -144,13 +268,14 @@
   }
 
   .tools {
-    width: 200px;
+    width: 30vw;
     background-color: #f4f4f4;
     padding: 10px;
     border-right: 1px solid #ddd;
   }
 
   .canvas-container {
+    width: 60vw;
     flex-grow: 1;
     display: flex;
     justify-content: center;
@@ -202,13 +327,14 @@
         on:dragstart={(e) => handleDragStart(e, image)}
         aria-label={`Drag ${image} to canvas`}
       >
-        <img src={image.url} alt={image.name} />
+        <img src={image.thumb} alt={image.name} />
         <p>{image.name}</p> 
       </button>
     {/each}
   </div>
 
   <div class="canvas-container">
-    <canvas bind:this={canvas} width="800" height="600"></canvas>
+    <!-- portrait orientation: width x height -->
+    <canvas bind:this={canvas} width="500" height="800"></canvas>
   </div>
 </div>

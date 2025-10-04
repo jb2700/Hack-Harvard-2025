@@ -6,7 +6,7 @@ set -o pipefail
 set -o nounset
 
 # Start frontend
-npm run dev &
+npm run dev -- --host 0.0.0.0 &
 VITE_PID=$!
 
 echo "Started Vite (pid=$VITE_PID)"

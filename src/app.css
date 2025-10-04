@@ -3,6 +3,14 @@ html, body, #app {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
+.title {
+  font-family: "Barriecito";
+  font-size: 5rem;
+  font-weight: bold;
+  text-align: center;
+  margin: 0rem 0;
+  color: #333;
+}
 main {
   padding: 2rem;
 }
