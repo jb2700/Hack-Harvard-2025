@@ -6,5 +6,7 @@ compatibility_date = "2025-10-04"
 [ai]
 binding = "AI"
 
+main = "worker.js"
+
 [build]
 upload_format = "service-worker"
