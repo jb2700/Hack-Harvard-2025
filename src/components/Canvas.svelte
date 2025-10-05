@@ -325,12 +325,13 @@
       loading = false;
     }
   }
-
+  let canvasWidth = 1000;
+  let canvasHeight = 800;
   onMount(() => {
     fabricCanvas = new Canvas(canvasEl, {
-      width: 500,
-      height: 800,
-      backgroundColor: "#ffffff",
+      width: canvasWidth,
+      height: canvasHeight,
+      backgroundColor: "#1d2021",
     });
 
     fabricCanvas.renderAll();
@@ -477,8 +478,8 @@
   >
     <canvas
       bind:this={canvasEl}
-      width="500"
-      height="800"
+      width='${canvasWidth}'
+      height='${canvasHeight}'
       aria-label="Fabric editing canvas"
     ></canvas>
   </div>
@@ -585,7 +586,7 @@
   }
 
   .canvas-container {
-    width: 60vw;
+    width: 80vw;
     flex-grow: 1;
     display: flex;
     justify-content: center;
