@@ -36,7 +36,7 @@
 </script>
 
 <div class="upload">
-  <input type="file" accept="image/*" on:change={onFileChange} />
+  <input type="file" accept="image/*" capture="environment" on:change={onFileChange} />
   {#if previewUrl}
     <div style="margin-top:8px">
       <img src={previewUrl} alt="preview" style="max-width:300px; max-height:200px" />

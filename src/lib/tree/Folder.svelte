@@ -151,7 +151,7 @@
   }
   .file-entry:hover { background: rgba(0,0,0,0.02); }
   .thumb { width: 48px; height: auto; border: 1px solid #ddd; }
-  .composite-thumb { width: 56px; height: 56px; object-fit: contain; border: 1px solid #ddd; margin-left: auto; }
+  .composite-thumb { width: 80px; height: 80px; object-fit: contain; border: 1px solid #ddd; margin-left: auto; }
 </style>
 
 <div>

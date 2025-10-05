@@ -331,7 +331,7 @@
     fabricCanvas = new Canvas(canvasEl, {
       width: canvasWidth,
       height: canvasHeight,
-      backgroundColor: "#1d2021",
+      backgroundColor: "transparent",
     });
 
     fabricCanvas.renderAll();
@@ -535,12 +535,13 @@
     margin: 0;
   }
 
-  .bottom .toolbar {
+  .toolbar {
     background: var(--gb-panel-variant);
     padding: 8px;
     border-radius: 6px;
     border: 1px solid var(--gb-border);
   }
+
 
   /*.tool-btn {
     margin-bottom: 10px;
@@ -556,7 +557,12 @@
 
   .tool-btn {
     background-color: var(--gb-muted);
+    color: var(--gb-bg);
+    border-radius: 6px;
+    padding: 1rem;
+    box-shadow: none;
   }
+
   .tool-btn:hover {
     background-color: var(--gb-button-hover);
   }

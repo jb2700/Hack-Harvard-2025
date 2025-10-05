@@ -10,8 +10,9 @@ html, body, #app {
   text-align: center;
   margin: 0rem 0;
   color: #333;
+  z-index: 100;
+  position: relative;
 }
 
 main {
-  padding: 2rem;
 }

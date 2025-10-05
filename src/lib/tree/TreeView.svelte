@@ -13,12 +13,17 @@
 
     for (const it of items) {
       const parts = it.name.split('/').filter(Boolean);
+      // Optionally skip the top two container levels when they are the
+      // known prefixes 'images' and 'sam shapes' which only contain a
+      // single inner folder and clutter the tree.
+      let startIndex = 2;
+
       // current map and entry start at root
       let nodeMap = root;
       let currentEntry = rootEntry;
 
       // iterate only up to parent folder (exclude the last segment which is the filename)
-      for (let i = 0; i < Math.max(0, parts.length - 1); i++) {
+      for (let i = startIndex; i < Math.max(startIndex, parts.length - 1); i++) {
         const part = parts[i];
         if (!nodeMap.has(part)) nodeMap.set(part, { __children: new Map(), __files: [] });
         currentEntry = nodeMap.get(part);
@@ -48,7 +53,9 @@
     padding: 6px; 
     font-family: system-ui; 
     max-height: 70vh;
-    font-size: 13px; }
+    overflow-y: hidden;
+    font-size: 13px; 
+    }
 </style>
 
 <div class="tree" role="tree">
