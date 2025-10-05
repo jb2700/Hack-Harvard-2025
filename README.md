@@ -1,12 +1,13 @@
 # Promosaic: Remix anything, anytime.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/1.png" width="20%">
-  <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/2.png" width="50%">
-  <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/3.png" width="20%">
+  <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/1.png" width="48%">
+  <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/2.png" width="48%">
 </p>
 
 Our project reimagines how people can capture, remix, and reuse the designs that surround them every day. Using Meta’s Segment Anything Model, we built an editor that makes it effortless to transform “designs in the wild”—whether it’s a vinyl sticker, a flyer taped to a pole, or a massive billboard—into reusable creative material. Instead of simply copying, our tool lets you extract structure, preserve style, and generate entirely new designs that blend elements from multiple sources.
+
+<img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/3.png" width="90%">
 
 Here’s how it works:
 	1.	Image preprocessing: Using the state-of-the-art Segment Anything model, we transform photos of graphics and text -- in nearly any setting, with varying illuminations, angles, and orientation -- into clean masked outlines.
