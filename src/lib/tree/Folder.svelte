@@ -125,16 +125,22 @@
     text-align: left;
   }
   .folder:hover { background: rgba(0,0,0,0.03); }
-  
-.files:has(.file-entry) {
+
+  /* Container that holds nested folders and the file-entries wrapper. Keep
+     scrolling behavior on this container when there are many items. */
+  .files {
+    margin-left: 16px;
+  }
+
+  /* Explicit flex wrapper for file entries so thumbnails wrap reliably.
+     Avoids the experimental :has() selector and keeps styles local. */
+  .file-entries {
     display: flex;
     align-content: flex-start;
     flex-wrap: wrap;
     flex-direction: row;
-    max-height: 300px;
-    overflow-y: auto;
-}
-.files { margin-left: 16px; }
+    gap: 8px;
+  }
   .file-entry {
     display: flex;
     align-items: center;
@@ -176,11 +182,13 @@
         <Folder node={child} path={path + '/' + child.name} on:open={(e) => dispatch('open', e.detail)} on:drag={(e) => dispatch('drag', e.detail)} />
       {/each}
 
+      <div class="file-entries">
       {#each node.files as file}
         <button class="file-entry" type="button" draggable="true" on:dragstart={(e) => onFileDragStart(e, file)} on:click={() => onFileClick(file)}>
           <img src={file.thumb} alt={file.name} class="thumb" />
         </button>
       {/each}
+      </div>
     </div>
   {/if}
 </div>

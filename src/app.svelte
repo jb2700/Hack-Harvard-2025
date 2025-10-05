@@ -1,5 +1,6 @@
 <script>
   import Canvas from './components/Canvas.svelte'
+  import eyeSrc from './assets/eye.png';
 </script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,13 +20,17 @@
   --gb-button-hover: #665c54;
   --gb-canvas-edge: #2a2a28;
 }
+.title-icon {
+  margin-left: 1.5rem;
+  width: 80px;
+}
 .title {
   font-family: "Barriecito";
   font-size: 5rem;
   font-weight: bold;
   text-align: center;
   margin: 0rem 0;
-  color: #333;
+  color: #b3a980;
 }
 :global(html, body) {
   height: 100%;
@@ -42,6 +47,6 @@ main {
 <main>
   <!-- <h1>Prosaic Editor (Upload)</h1> -->
 
-  <h1 class="title">Promosaic </h1>
+  <h1 class="title">Promosaic<img src={eyeSrc} alt="eye" class="title-icon" /></h1>
   <Canvas />
 </main>

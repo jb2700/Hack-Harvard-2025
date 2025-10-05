@@ -3,6 +3,7 @@
   import { Canvas, Image as FabricImage } from "fabric";
   import TreeView from "../lib/tree/TreeView.svelte";
   import { imagesRefresh } from "../stores/imagesRefresh.js";
+  import Upload from "./Upload.svelte";
 
   let canvasEl;
   let fabricCanvas;
@@ -383,6 +384,7 @@
   <div class="tools">
     <div class="top">
       <div style="display:flex;align-items:center;gap:8px">
+        <Upload />
         <h3 class="toolbar-title">Uploaded Images</h3>
         <button
           title="Reload images"
