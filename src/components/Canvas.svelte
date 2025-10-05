@@ -14,6 +14,7 @@
   // List of image URLs (returned from your backend)
   let images = [];
   let loading = true;
+  let loadError = null;
 
   // Add a new image object to the canvas (default position or specified)
   function addImageToCanvas(url, opts = {}) {
@@ -245,12 +246,31 @@
   }
 
   let _refreshUnsub = null;
+  let networkTestResult = null;
+
+  async function runNetworkTest() {
+    networkTestResult = 'Testing...';
+    try {
+      const r = await fetch('/all_images');
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      const j = await r.json();
+      networkTestResult = `OK: ${Array.isArray(j.images) ? j.images.length : '?.?'} images`;
+    } catch (err) {
+      networkTestResult = `ERR: ${err && err.message ? err.message : String(err)}`;
+    }
+  }
 
   async function loadImages() {
     loading = true;
+    loadError = null;
     try {
-      const response = await fetch("http://localhost:5054/all_images");
-      const data = await response.json();
+  // Use a relative URL so the Vite dev server proxy (configured in vite.config.js)
+  // forwards the request to the backend. Hard-coded localhost breaks when the
+  // page is opened from another device (e.g. an iPad) because `localhost` then
+  // refers to that device, not your dev machine.
+  const response = await fetch('/all_images');
+  if (!response.ok) throw new Error(`Fetch /all_images failed: ${response.status} ${response.statusText}`);
+  const data = await response.json();
       const tempCanvas = document.createElement("canvas");
       const tempCtx = tempCanvas.getContext("2d");
 
@@ -265,7 +285,7 @@
 
           await new Promise((resolve, reject) => {
             img.onload = () => resolve();
-            img.onerror = (e) => reject(e);
+            img.onerror = (e) => reject(new Error(`Image load failed for ${url}`));
           });
 
           const iw = img.naturalWidth || img.width;
@@ -321,6 +341,7 @@
     } catch (err) {
       console.error("Failed to load images", err);
       images = [];
+      loadError = err && err.message ? err.message : String(err);
     } finally {
       loading = false;
     }
@@ -395,8 +416,8 @@
         >
           <!-- small reload SVG -->
           <svg
-            width="18"
-            height="18"
+            width="32"
+            height="32"
             viewBox="0 0 24 24"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
@@ -404,68 +425,128 @@
           >
             <path
               d="M21 12a9 9 0 10-2.7 6.3"
-              stroke="#333"
+              stroke="#bdae93"
               stroke-width="2"
               stroke-linecap="round"
               stroke-linejoin="round"
             />
             <path
               d="M21 3v6h-6"
-              stroke="#333"
+              stroke="#bdae93"
               stroke-width="2"
               stroke-linecap="round"
               stroke-linejoin="round"
             />
           </svg>
         </button>
+        <button on:click={runNetworkTest} style="margin-left:8px;padding:6px 10px">Network test</button>
+        {#if networkTestResult}
+          <div style="font-size:0.9rem;margin-left:8px;color:var(--gb-muted)">{networkTestResult}</div>
+        {/if}
       </div>
-      {#if loading}
-        <div>Loading images…</div>
-      {:else}
+      <div style="display:flex;flex-direction:column;gap:8px">
+        {#if loading}
+          <div aria-live="polite">Loading images…</div>
+        {:else}
+          {#if loadError}
+            <div style="color:salmon">Failed to load images: {loadError}</div>
+          {/if}
+        {/if}
+
+        <!-- Always render the TreeView so it's present on small screens even when
+             loading or when there are no images. This prevents the tree area from
+             disappearing on iPad where touch navigation can hide content. -->
         <TreeView
           items={images}
           on:drag={(e) => onTreeDrag(e)}
           on:open={(e) => onTreeOpen(e)}
         />
-      {/if}
+      </div>
     </div>
     <div class="toolbar" role="toolbar" aria-label="Object actions">
       <button
         class="tool-btn"
         type="button"
         on:click={bringToFront}
-        disabled={!selectedExists}>Bring to front</button
-      >
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Bring to front</title>
+          <rect x="3.5" y="8.5" width="9" height="6" rx="1" transform="rotate(-6 3.5 8.5)" />
+          <rect x="6" y="5" width="9" height="6" rx="1" transform="rotate(-3 6 5)" />
+          <rect x="9" y="1.5" width="9" height="6" rx="1" />
+          <path d="M17 22v-6" />
+          <path d="M14 9l3-3 3 3" transform="translate(-3 9) scale(.67)"/>
+        </svg>
+        Bring to front
+      </button>
       <button
         class="tool-btn"
         type="button"
         on:click={sendToBack}
-        disabled={!selectedExists}>Send to back</button
-      >
-      <button
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Send to back</title>
+          <rect x="9" y="1.5" width="9" height="6" rx="1" />
+          <rect x="6" y="5" width="9" height="6" rx="1" transform="rotate(3 6 5)" />
+          <rect x="3.5" y="8.5" width="9" height="6" rx="1" transform="rotate(6 3.5 8.5)" />
+          <path d="M17 2v6" />
+          <path d="M14 9l3 3 3-3" transform="translate(-3 -1) scale(.67)"/>
+        </svg>
+        Send to back
+      </button>
+      <!-- <button
         class="tool-btn"
         type="button"
         on:click={bringForward}
-        disabled={!selectedExists}>Bring forward</button
-      >
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Bring forward</title>
+          <rect x="4" y="6" width="12" height="10" rx="1" />
+          <path d="M19 17v-4" />
+          <path d="M16 10l3-3 3 3" transform="translate(-5 3) scale(.6)"/>
+        </svg>
+        Bring forward
+      </button> -->
       <button
         class="tool-btn"
         type="button"
         on:click={sendBackwards}
-        disabled={!selectedExists}>Send back</button
-      >
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Send back</title>
+          <rect x="4" y="6" width="12" height="10" rx="1" />
+          <path d="M19 7v4" />
+          <path d="M16 14l3 3 3-3" transform="translate(-5 -3) scale(.6)"/>
+        </svg>
+        Send back
+      </button>
       <button
         class="tool-btn"
         type="button"
         on:click={duplicateObject}
-        disabled={!selectedExists}>Duplicate</button
-      >
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Duplicate</title>
+          <rect x="6.5" y="6.5" width="11" height="10" rx="1" transform="translate(1 1)" />
+          <rect x="3" y="3" width="11" height="10" rx="1" />
+        </svg>
+        Duplicate
+      </button>
       <button
         class="tool-btn"
         type="button"
         on:click={deleteActive}
-        disabled={!selectedExists}>Delete</button
-      >
+        disabled={!selectedExists}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Delete</title>
+          <rect x="6" y="7" width="12" height="12" rx="1" />
+          <path d="M4 7h16" />
+          <path d="M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+        </svg>
+        Delete
+      </button>
     </div>
   </div>
 
@@ -600,8 +681,31 @@
     align-items: center;
   }
 
+  /* Responsive: on small screens (tablets/phones) stack the tools above the canvas */
+  @media (max-width: 900px) {
+    .editor-container {
+      flex-direction: column;
+      height: auto;
+    }
+    .tools {
+      width: 100%;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--gb-border);
+    }
+    .canvas-container {
+      width: 100%;
+      padding: 12px 0;
+    }
+    canvas {
+      width: calc(100% - 24px);
+      max-width: 100%;
+      height: auto !important;
+    }
+  }
+
   canvas {
-    border: 1px solid #ccc;
+    border: 1px solid var(--gb-border);
     cursor: crosshair;
   }
 

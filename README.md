@@ -5,16 +5,24 @@
   <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/2.png" width="48%">
 </p>
 
-Our project reimagines how people can capture, remix, and reuse the designs that surround them every day. Using Meta’s Segment Anything Model, we built an editor that makes it effortless to transform “designs in the wild”—whether it’s a vinyl sticker, a flyer taped to a pole, or a massive billboard—into reusable creative material. Instead of simply copying, our tool lets you extract structure, preserve style, and generate entirely new designs that blend elements from multiple sources.
+Our project reimagines how people can capture, remix, and reuse the designs that surround them every day. Using Meta’s Segment Anything Model 2, we built an editor that makes it effortless to transform “designs in the wild”—whether it’s a vinyl sticker, a flyer taped to a pole, or a massive billboard—into reusable creative material. 
+
+Instead of simply copying, our tool enables you to extract structure, preserve styles, and generate entirely new designs, blending elements from multiple sources.
 
 <img src="https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/3.png" width="90%">
 
 Here’s how it works:
 	1.	Image preprocessing: Using the state-of-the-art Segment Anything model, we transform photos of graphics and text -- in nearly any setting, with varying illuminations, angles, and orientation -- into clean masked outlines.
+
 	2.	Element classification: Using PyTesseract and font classification algorithms, we identify text and font details, while regions are labeled as headings, body text, images, or decorations.
+
 	3.	Style extraction: We try to pull the design’s “feel”—its color palette, gradients, textures, borders, margins, spacing, and alignment rules.
+
 	4.	Template generation: With a reusable vector template (SVG/JSON), we align placeholders and style attributes aligned to the original. 
+
 	5.	User interface: Through our editor, you can tweak placements, swap fonts, or adjust spacing, and export a polished output as PDF. This means you can easily swap in elements from different input sources, like stickers or text decals!
+
+	6.	Generative infill. In the future integrating generative AI models to infill missing elements is an exciting possibility, allowing the reconstruction of occluded text or generating backgrounds which match the original style.
 
 ![diagram of methodology](https://raw.githubusercontent.com/jb2700/Hack-Harvard-2025/refs/heads/main/readme_imgs/diagram.jpg)
 
