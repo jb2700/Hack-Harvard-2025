@@ -325,8 +325,8 @@
       loading = false;
     }
   }
-  let canvasWidth = 1000;
-  let canvasHeight = 800;
+  let canvasWidth = 1400;
+  let canvasHeight = 1200;
   onMount(() => {
     fabricCanvas = new Canvas(canvasEl, {
       width: canvasWidth,
@@ -509,6 +509,7 @@
     flex-direction: column;
     justify-content: space-between;
     gap: 10px;
+    height: 80vh;
   }
 
   .canvas-container {
