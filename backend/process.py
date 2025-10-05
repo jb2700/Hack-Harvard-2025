@@ -65,8 +65,6 @@ def detect_text_boxes(img_rgb):
                 x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
                 text_boxes.append((x, y, w, h))
                 cv2.rectangle(img_with_boxes, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-    cv2.imwrite(str(OUT_RGBA_DIR / "text_boxes.png"), cv2.cvtColor(img_with_boxes, cv2.COLOR_RGB2BGR))
     return text_boxes
 
 #Groups masks by their text bounding boxes.
@@ -110,19 +108,19 @@ def downscale_image(img, max_dim=1600):
 def save_masks_for_image(img_filename):
     down_path = ROOT / "images" / "input" / "downscaled" / img_filename
     load_path = down_path
-
+    print(f"Loading image from: {load_path}")
     img_rgb = np.array(Image.open(load_path).convert("RGB"))
     masks = get_masks(img_rgb)
-
-    out_dir = OUT_RGBA_DIR / img_filename.rstrip(".jpeg")
+    # use Path.stem to remove suffix safely (don't use str.rstrip which treats characters as a set)
+    out_dir = ROOT / "images" / "sam_shapes" / Path(img_filename).stem
+    print(f"Will write masks to: {out_dir}")
     write_masks(masks, out_dir, img_rgb)
     groups = group_masks_by_text(img_rgb, masks)
-
+    print("writing group_masks to out_dir:", out_dir)
     if groups:
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(out_dir / "groups.json", "w") as f:
             json.dump({"groups": groups}, f, indent=2)
-            
         print(f"Wrote groups.json with {len(groups)} groups")
         for g in groups:
             tb = g.get('text_box', None)

@@ -99,7 +99,6 @@
         if (composite) e.dataTransfer.setData('application/folder-composite', composite);
       } catch (err) { /* ignore */ }
 
-      // set drag image (use an Image element if composite isn't available)
       try {
         if (composite) {
           const img = new Image();
@@ -127,6 +126,12 @@
   }
   .folder:hover { background: rgba(0,0,0,0.03); }
   .files { margin-left: 16px; }
+   .files {
+    display: flex;
+    align-content: flex-start;
+    flex-wrap: wrap;
+    flex-direction: row;
+  }
   .file-entry {
     display: flex;
     align-items: center;

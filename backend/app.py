@@ -5,7 +5,7 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import cv2
 import numpy as np
-
+from process import save_masks_for_image
 ROOT = Path(__file__).resolve().parent
 UPLOAD_DIR = ROOT / "images"
 DOWNSCALE_DIR = ROOT / "images" / "input" / "downscaled"
@@ -63,6 +63,8 @@ def upload_image():
         cv2.imwrite(str(DOWNSCALE_DIR / filename), img_small)
 
         #3: START PROCESS_FILE
+        save_masks_for_image(str(DOWNSCALE_DIR / filename))
+
         rel_url = f"/images/input/original/{filename}"
         return jsonify({"filename": filename, "url": rel_url})
     return jsonify({"error": "invalid file type"}), 400
@@ -85,7 +87,7 @@ def list_images():
         if f.is_file() and allowed_file(f.name):
             rel = f.relative_to(UPLOAD_DIR).as_posix()
             files.append(f"/images/{rel}")
-    print("Here are the sam_shapes image URLs:", files)
+    # print("Here are the sam_shapes image URLs:", files)
     return jsonify({"images": files})
 
 if __name__ == "__main__":

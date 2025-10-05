@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { uploadedImage } from '../stores/uploaded.js'
+  import { imagesRefresh } from '../stores/imagesRefresh.js'
   let file = null
   let previewUrl = null
   let status = ''
@@ -14,7 +15,7 @@
 
   async function upload() {
     if (!file) return
-    status = 'Uploading...'
+    status = 'Uploading and generating masks...'
     const form = new FormData()
     form.append('file', file)
     try {
@@ -22,6 +23,8 @@
       const json = await res.json()
       if (res.ok) {
         uploadedImage.set(json.url)
+        // trigger a refresh so the image list updates
+        imagesRefresh.update(n => n + 1)
         status = 'Uploaded'
       } else {
         status = 'Error: ' + (json.error || res.statusText)

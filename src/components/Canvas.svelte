@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Canvas, Image as FabricImage } from 'fabric';
   import TreeView from '../lib/tree/TreeView.svelte';
+  import { imagesRefresh } from '../stores/imagesRefresh.js';
 
   let canvasEl;
   let fabricCanvas;
@@ -212,7 +213,82 @@
     return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
   }
 
-  onMount(async () => {
+  let _refreshUnsub = null;
+
+  async function loadImages() {
+    loading = true;
+    try {
+      const response = await fetch('http://localhost:5054/all_images');
+      const data = await response.json();
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+
+      const loaded = await Promise.all(
+        data.images.map(async (imagePath) => {
+          const url = imagePath;
+          const name = imagePath;
+
+          const img = new window.Image();
+          img.crossOrigin = 'anonymous';
+          img.src = url;
+
+          await new Promise((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = (e) => reject(e);
+          });
+
+          const iw = img.naturalWidth || img.width;
+          const ih = img.naturalHeight || img.height;
+          tempCanvas.width = iw;
+          tempCanvas.height = ih;
+
+          tempCtx.clearRect(0, 0, iw, ih);
+          tempCtx.drawImage(img, 0, 0, iw, ih);
+          const imageData = tempCtx.getImageData(0, 0, iw, ih).data;
+
+          const bbox = getBBox(imageData, iw, ih);
+
+          const cropCanvas = document.createElement('canvas');
+          const cropCtx = cropCanvas.getContext('2d');
+          const cropW = Math.max(1, bbox.width);
+          const cropH = Math.max(1, bbox.height);
+          cropCanvas.width = cropW;
+          cropCanvas.height = cropH;
+          cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+          cropCtx.drawImage(img, -bbox.x, -bbox.y, iw, ih);
+
+          const fullCroppedDataUrl = cropCanvas.toDataURL('image/png');
+
+          const maxThumb = 120;
+          let thumbDataUrl;
+          if (Math.max(cropW, cropH) > maxThumb) {
+            const scale = maxThumb / Math.max(cropW, cropH);
+            const sw = Math.max(1, Math.round(cropW * scale));
+            const sh = Math.max(1, Math.round(cropH * scale));
+            const scaleCanvas = document.createElement('canvas');
+            scaleCanvas.width = sw;
+            scaleCanvas.height = sh;
+            const sctx = scaleCanvas.getContext('2d');
+            sctx.drawImage(cropCanvas, 0, 0, cropW, cropH, 0, 0, sw, sh);
+            thumbDataUrl = scaleCanvas.toDataURL('image/png');
+          } else {
+            thumbDataUrl = fullCroppedDataUrl;
+          }
+
+          return { url: fullCroppedDataUrl, name, naturalWidth: cropW, naturalHeight: cropH, bbox, thumb: thumbDataUrl };
+        })
+      );
+
+      images = loaded;
+    } catch (err) {
+      console.error('Failed to load images', err);
+      images = [];
+    } finally {
+      loading = false;
+    }
+  }
+
+  onMount(() => {
     fabricCanvas = new Canvas(canvasEl, {
         width: 500,
         height: 800,
@@ -221,84 +297,14 @@
 
     fabricCanvas.renderAll();
 
-    const response = await fetch('http://localhost:5054/all_images');
-    console.log("Response:", response);
-    const data = await response.json();
-    console.log("Fetched image data:", data);
-    console.log(data.images);
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
+    // initial load
+    loadImages();
 
-    const loaded = await Promise.all(
-      data.images.map(async (imagePath) => {
-        const url = imagePath;
-        const parts = imagePath.split('/').filter(Boolean);
-        const name = imagePath;
-
-        // load the image (use window.Image to avoid shadowing the Fabric Image import)
-        const img = new window.Image();
-        img.crossOrigin = 'anonymous';
-        img.src = url;
-
-        await new Promise((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = (e) => reject(e);
-        });
-
-        // size the temp canvas to image natural size
-        const iw = img.naturalWidth || img.width;
-        const ih = img.naturalHeight || img.height;
-        tempCanvas.width = iw;
-        tempCanvas.height = ih;
-
-        // draw and read pixels
-        tempCtx.clearRect(0, 0, iw, ih);
-        tempCtx.drawImage(img, 0, 0, iw, ih);
-        const imageData = tempCtx.getImageData(0, 0, iw, ih).data;
-
-        let bbox = getBBox(imageData, iw, ih)
-        console.log(`Image ${name} bbox:`, bbox);
-
-        const cropCanvas = document.createElement('canvas');
-        const cropCtx = cropCanvas.getContext('2d');
-        // ensure at least 1x1
-        const cropW = Math.max(1, bbox.width);
-        const cropH = Math.max(1, bbox.height);
-        cropCanvas.width = cropW;
-        cropCanvas.height = cropH;
-        // draw the image offset so the bbox region fills the crop canvas (this yields a full-resolution cropped image)
-        cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
-        cropCtx.drawImage(img, -bbox.x, -bbox.y, iw, ih);
-
-        // This is the full-resolution cropped data URL (used as the actual image source for the canvas)
-        const fullCroppedDataUrl = cropCanvas.toDataURL('image/png');
-
-        // create a thumbnail DataURL for sidebar display
-        const maxThumb = 120;
-        let thumbDataUrl;
-        if (Math.max(cropW, cropH) > maxThumb) {
-          const scale = maxThumb / Math.max(cropW, cropH);
-          const sw = Math.max(1, Math.round(cropW * scale));
-          const sh = Math.max(1, Math.round(cropH * scale));
-          const scaleCanvas = document.createElement('canvas');
-          scaleCanvas.width = sw;
-          scaleCanvas.height = sh;
-          const sctx = scaleCanvas.getContext('2d');
-          sctx.drawImage(cropCanvas, 0, 0, cropW, cropH, 0, 0, sw, sh);
-          thumbDataUrl = scaleCanvas.toDataURL('image/png');
-        } else {
-          thumbDataUrl = fullCroppedDataUrl;
-        }
-
-        return { url: fullCroppedDataUrl, name, naturalWidth: cropW, naturalHeight: cropH, bbox, thumb: thumbDataUrl };
-      })
-  );
-
-  console.log(loaded)
-
-  // populate images for the UI
-  images = loaded;
-  loading = false;
+    // subscribe to explicit refresh triggers
+    _refreshUnsub = imagesRefresh.subscribe((n) => {
+      // whenever the counter increments, reload images
+      loadImages();
+    });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -314,8 +320,6 @@
       const obj = e.target;
       selectedExists = !!obj;
       if (obj) {
-        // optionally bring selected to front so it's on top while editing
-        // obj.bringToFront();
         fabricCanvas.requestRenderAll();
       }
     });
@@ -324,7 +328,6 @@
       const obj = e.target;
       selectedExists = !!obj;
       if (obj) {
-        // obj.bringToFront();
         fabricCanvas.requestRenderAll();
       }
     });
@@ -332,6 +335,10 @@
     fabricCanvas.on('selection:cleared', () => {
       selectedExists = false;
     });
+
+    return () => {
+      if (_refreshUnsub) _refreshUnsub();
+    };
   });
 
 </script>
@@ -357,6 +364,7 @@
     align-items: center;
     background-color: white;
   }
+  
 
   canvas {
     border: 1px solid #ccc;
@@ -392,7 +400,16 @@
       <button class="tool-btn" type="button" on:click={duplicateObject} disabled={!selectedExists}>Duplicate</button>
       <button class="tool-btn" type="button" on:click={deleteActive} disabled={!selectedExists}>Delete</button>
     </div>
-    <h3>Uploaded Images</h3>
+    <div style="display:flex;align-items:center;gap:8px">
+      <h3 style="margin:0">Uploaded Images</h3>
+      <button title="Reload images" aria-label="Reload images" on:click={() => imagesRefresh.update(n => n + 1)} style="background:none;border:0;padding:4px;cursor:pointer">
+        <!-- small reload SVG -->
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M21 12a9 9 0 10-2.7 6.3" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 3v6h-6" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
     {#if loading}
       <div>Loading images…</div>
     {:else}
