@@ -13,6 +13,8 @@
 
   // track whether an object is selected (for enabling toolbar buttons)
   let selectedExists = false;
+  // when true, the next canvas click will convert the clicked object to the background
+  let makeBgMode = false;
 
   // List of image URLs (returned from your backend)
   let images = [];
@@ -368,6 +370,182 @@
     }
   }
 
+  // Export each object on the canvas as an individual PNG file.
+  // This uses the canvas' toDataURL cropping options so we don't need to
+  // clone objects into temporary Fabric canvases.
+  async function exportAllObjectsAsPNGs() {
+    if (!fabricCanvas) {
+      console.warn('exportAllObjectsAsPNGs: fabricCanvas not initialized');
+      return;
+    }
+
+    const objs = (fabricCanvas.getObjects && fabricCanvas.getObjects()) || [];
+    if (!objs.length) {
+      console.warn('exportAllObjectsAsPNGs: no objects to export');
+      return;
+    }
+
+    // Save current active object so we can restore selection later.
+    const prevActive = fabricCanvas.getActiveObject && fabricCanvas.getActiveObject();
+
+    // Clear active selection so selection outlines don't show up in exports.
+    try { fabricCanvas.discardActiveObject && fabricCanvas.discardActiveObject(); } catch (e) {}
+
+    for (let i = 0; i < objs.length; i++) {
+      const o = objs[i];
+      // skip backgroundImage (it's not part of getObjects()) and invisible objects
+      if (!o || o === fabricCanvas.backgroundImage || o.visible === false) continue;
+
+      try {
+        // get bounding rect in canvas coordinates (include stroke/transform)
+        const rect = o.getBoundingRect && o.getBoundingRect(true);
+        if (!rect) continue;
+        const left = Math.max(0, Math.floor(rect.left));
+        const top = Math.max(0, Math.floor(rect.top));
+        const width = Math.max(1, Math.ceil(rect.width));
+        const height = Math.max(1, Math.ceil(rect.height));
+
+        // Ask Fabric to produce a cropped PNG for the bbox region
+        const dataUrl = fabricCanvas.toDataURL
+          ? fabricCanvas.toDataURL({ left, top, width, height, format: 'png' })
+          : null;
+
+        if (!dataUrl) {
+          console.warn('exportAllObjectsAsPNGs: toDataURL not available for object', o);
+          continue;
+        }
+
+        // Trigger download
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        const id = o.id || `object-${i + 1}`;
+        a.download = `${id}.png`;
+        // Some browsers require the anchor to be in the DOM
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        // small delay to avoid overwhelming the browser with many downloads
+        await new Promise((res) => setTimeout(res, 80));
+      } catch (err) {
+        console.warn('exportAllObjectsAsPNGs: failed for object', i, err);
+      }
+    }
+
+    // Try to restore previous selection
+    try {
+      if (prevActive && fabricCanvas.setActiveObject) {
+        fabricCanvas.setActiveObject(prevActive);
+      }
+    } catch (e) {
+      /* ignore restore errors */
+    }
+
+    // ensure canvas re-renders and toolbar state is consistent
+    try { selectedExists = !!(fabricCanvas.getActiveObject && fabricCanvas.getActiveObject()); } catch(e) {}
+    fabricCanvas.requestRenderAll && fabricCanvas.requestRenderAll();
+  }
+
+  // Try to extract a usable image src (URL or dataURL) from a Fabric image object.
+  function getObjectSrc(obj) {
+    if (!obj) return null;
+    try {
+      if (typeof obj.getSrc === 'function') {
+        const s = obj.getSrc();
+        if (s) return s;
+      }
+    } catch (e) {}
+    if (obj._originalElement && obj._originalElement.src) return obj._originalElement.src;
+    if (obj._element && obj._element.src) return obj._element.src;
+    try {
+      if (typeof obj.getElement === 'function') {
+        const el = obj.getElement();
+        if (el && el.src) return el.src;
+      }
+    } catch (e) {}
+    // last resort: if Fabric Image exposes toDataURL for the object itself
+    try {
+      if (obj.toDataURL) return obj.toDataURL();
+    } catch (e) {}
+    return null;
+  }
+
+  // Make the next-clicked object become the canvas background (and remove it).
+  function make_background() {
+    if (!fabricCanvas) {
+      console.warn('make_background: fabricCanvas not initialized');
+      return;
+    }
+
+    if (!canvasEl) {
+      console.warn('make_background: canvas element not available');
+      return;
+    }
+
+    makeBgMode = true;
+    const prevCursor = canvasEl.style.cursor;
+    canvasEl.style.cursor = 'crosshair';
+
+    const handler = (e) => {
+      try {
+        const target = e.target || (e && e.subTargets && e.subTargets[0]) || null;
+        if (!target) {
+          console.log('make_background: no object clicked; cancelling');
+          cleanup();
+          return;
+        }
+
+        // if activeSelection, prefer the first member (user can convert grouped objects by ungrouping first)
+        const obj = (target.type === 'activeSelection' && target._objects && target._objects[0]) ? target._objects[0] : target;
+
+        const src = getObjectSrc(obj);
+        if (!src) {
+          // fallback: crop the object's bbox to a PNG dataURL and use that
+          const rect = obj.getBoundingRect && obj.getBoundingRect(true);
+          if (rect && fabricCanvas.toDataURL) {
+            const left = Math.max(0, Math.floor(rect.left));
+            const top = Math.max(0, Math.floor(rect.top));
+            const width = Math.max(1, Math.ceil(rect.width));
+            const height = Math.max(1, Math.ceil(rect.height));
+            const dataUrl = fabricCanvas.toDataURL({ left, top, width, height, format: 'png' });
+            if (dataUrl) {
+              // remove the object then set background
+              try { fabricCanvas.remove(obj); } catch (e) {}
+              changeBackgroundImage(dataUrl, true);
+            } else {
+              console.warn('make_background: unable to generate data URL for object');
+            }
+          } else {
+            console.warn('make_background: object has no source and cannot be exported');
+          }
+        } else {
+          // remove object then set background image from its src
+          try { fabricCanvas.remove(obj); } catch (e) {}
+          changeBackgroundImage(src, true);
+        }
+      } catch (err) {
+        console.error('make_background handler error:', err);
+      } finally {
+        cleanup();
+      }
+    };
+
+    const cleanup = () => {
+      makeBgMode = false;
+      try { fabricCanvas.off && fabricCanvas.off('mouse:down', handler); } catch (e) {}
+      try { canvasEl.style.cursor = prevCursor || 'crosshair'; } catch (e) {}
+    };
+
+    // attach a one-time mouse:down handler on the Fabric canvas
+    try {
+      fabricCanvas.on && fabricCanvas.on('mouse:down', handler);
+    } catch (e) {
+      console.warn('make_background: failed to attach mouse handler', e);
+      // fallback: cancel mode
+      cleanup();
+    }
+  }
+
   function bringForward() {
     const obj = fabricCanvas.getActiveObject();
     console.log("bringForward obj:", obj);
@@ -509,6 +687,51 @@
       console.warn("onTreeDrag failed to set dataTransfer", err);
     }
   }
+
+//   function resetCanvas() {
+//     if (!fabricCanvas) return;
+
+//     const DEF_W = 800;
+//     const DEF_H = 600;
+
+//     try {
+//       // discard any active selection first
+//       try { fabricCanvas.discardActiveObject && fabricCanvas.discardActiveObject(); } catch (e) {}
+
+//       // clear objects/background
+//       try { fabricCanvas.clear(); } catch (e) { console.warn('resetCanvas: clear failed', e); }
+//       try { fabricCanvas.backgroundImage = null; } catch (e) {}
+
+//       // reset viewport transform (important if canvas was zoomed/panned)
+//       try { fabricCanvas.setViewportTransform && fabricCanvas.setViewportTransform([1, 0, 0, 1, 0, 0]); } catch (e) {}
+
+//       // set logical Fabric canvas size
+//       try {
+//         fabricCanvas.setWidth(DEF_W);
+//         fabricCanvas.setHeight(DEF_H);
+//       } catch (e) {
+//         console.warn('resetCanvas: setWidth/setHeight failed', e);
+//       }
+
+//       // sync DOM canvas size/style
+//       if (canvasEl) {
+//         try { canvasEl.style.width = `${DEF_W}px`; canvasEl.style.height = `${DEF_H}px`; } catch (e) {}
+//         try { canvasEl.width = DEF_W; canvasEl.height = DEF_H; } catch (e) {}
+//       }
+
+//       // recalc offsets and object coords so selection boxes are correct
+//       try { fabricCanvas.calcOffset && fabricCanvas.calcOffset(); } catch (e) {}
+//       try { fabricCanvas.getObjects && fabricCanvas.getObjects().forEach(o => o.setCoords && o.setCoords()); } catch (e) {}
+
+//       // update component state and render
+//       canvasWidth = DEF_W;
+//       canvasHeight = DEF_H;
+//       selectedExists = false;
+//       try { fabricCanvas.requestRenderAll && fabricCanvas.requestRenderAll(); } catch (e) {}
+//     } catch (err) {
+//       console.error('resetCanvas failed', err);
+//     }
+//   }
 
   function getBBox(imageData, iw, ih) {
     let minX = iw,
@@ -838,12 +1061,48 @@
       <button
         class="tool-btn"
         type="button"
+        on:click={exportAllObjectsAsPNGs}
+        title="Download all objects as PNGs">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Download all objects</title>
+          <path d="M21 15v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4" />
+          <path d="M7 10l5-5 5 5" />
+          <path d="M12 5v10" />
+        </svg>
+        Download objects
+      </button>
+      <button
+        class="tool-btn"
+        type="button"
+        on:click={make_background}
+        title="Click an object to make it the background">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Make background</title>
+          <rect x="3" y="3" width="18" height="14" rx="1" />
+          <path d="M3 18h18v3H3z" />
+          <circle cx="8" cy="9" r="2" />
+          <path d="M14 7l4 4" />
+        </svg>
+        Make background
+      </button>
+      <button
+        class="tool-btn"
+        type="button"
         on:click={clearCanvas}>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <title>Clear Canvas</title>
         </svg>
         Clear Canvas
       </button>
+      <!-- <button
+        class="tool-btn"
+        type="button"
+        on:click={resetCanvas}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Reset Canvas</title>
+        </svg>
+        Reset Canvas
+      </button> -->
     </div>
   </div>
 
