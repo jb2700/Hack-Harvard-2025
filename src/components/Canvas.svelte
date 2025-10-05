@@ -8,6 +8,9 @@
   let canvasEl;
   let fabricCanvas;
 
+  // small incrementing id for objects so stack logs are useful
+  let _nextObjectId = 1;
+
   // track whether an object is selected (for enabling toolbar buttons)
   let selectedExists = false;
 
@@ -38,6 +41,16 @@
           ),
         );
 
+        // assign a simple id so debugging / stack prints show something meaningful
+        try {
+          const assignedId = `img-${_nextObjectId++}`;
+          // store on the object and in its properties for serialization
+          fImg.set && fImg.set({ id: assignedId });
+          fImg.id = assignedId;
+        } catch (e) {
+          /* ignore */
+        }
+
         if (opts.scale && typeof opts.scale === "number") {
           // modern Fabric uses scaleX/scaleY properties
           fImg.set({ scaleX: opts.scale, scaleY: opts.scale });
@@ -55,6 +68,10 @@
 
         fabricCanvas.add(fImg);
         fabricCanvas.setActiveObject(fImg);
+        // ensure Fabric recalculates object coordinates for selection bounds
+        try {
+          fImg.setCoords && fImg.setCoords();
+        } catch (e) {}
         fabricCanvas.requestRenderAll();
       } catch (err) {
         console.error("Error creating Fabric Image from element:", err);
@@ -71,18 +88,19 @@
   function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
+    console.log('handleDragOver', e);
   }
   function handleDrop(e) {
     e.preventDefault();
 
     // compute pointer in canvas coords
-    let pointer;
-    try {
-      pointer = fabricCanvas.getPointer(e);
-    } catch (err) {
+    // let pointer;
+    // try {
+    //   pointer = fabricCanvas.getPointer(e);
+    // } catch (err) {
       const rect = canvasEl.getBoundingClientRect();
-      pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    }
+      let pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    // }
 
     // If a folder composite drag was started, the Folder component stored the structured payload
     // in a temporary global `window.__folderDragPayload` (set by onTreeDrag when the TreeView forwarded the folder drag).
@@ -119,48 +137,325 @@
     addImageToCanvas(url, { left: pointer.x, top: pointer.y, thumbSize });
   }
 
-  // Toolbar actions
-  function bringToFront() {
-    const obj = fabricCanvas.getActiveObject();
-    if (obj) {
-      obj.bringToFront();
-      fabricCanvas.requestRenderAll();
+    function changeBackgroundImage(imagePath, resize = false) {
+    // imagePath: string (URL or relative path).
+    // resize: boolean - if true, resize the Fabric canvas to match the image dimensions.
+    if (!fabricCanvas) {
+      console.warn('changeBackgroundImage: fabricCanvas not initialized yet');
+      return;
     }
+
+    const imgEl = new window.Image();
+    // allow export/toDataURL without taint when possible
+    imgEl.crossOrigin = 'anonymous';
+    imgEl.onload = () => {
+      try {
+        // create a Fabric image from the loaded DOM image
+        const bg = new FabricImage(imgEl, {
+          originX: 'left',
+          originY: 'top',
+          left: 0,
+          top: 0,
+          selectable: false,
+          evented: false,
+        });
+
+        // Per Fabric note: attach a reference to the canvas so the image can
+        // detect zoom/viewport changes. Also disable objectCaching so the
+        // background responds to zoom correctly.
+        try {
+          bg.canvas = fabricCanvas;
+        } catch (e) {
+          /* ignore if read-only */
+        }
+        bg.set({ objectCaching: false });
+
+        // console.log("Set background image", bg);
+
+        // Enforce maximum/minimum rules and decide how to size the canvas.
+        // Max: 500W x 800H. Min: 300W x 500H. If image exceeds max, scale it
+        // down to fit within max before any canvas resize. If image is below
+        // min and resize=true we do NOT shrink the canvas (leave incomplete
+        // background).
+        const RAW_IW = imgEl.naturalWidth || imgEl.width || 1;
+        const RAW_IH = imgEl.naturalHeight || imgEl.height || 1;
+        const MAX_W = 500;
+        const MAX_H = 800;
+        const MIN_W = 300;
+        const MIN_H = 500;
+
+        // downscale factor to respect maximum constraints
+        const downScaleForMax = Math.min(1, MAX_W / RAW_IW, MAX_H / RAW_IH);
+        const iw = Math.max(1, Math.round(RAW_IW * downScaleForMax));
+        const ih = Math.max(1, Math.round(RAW_IH * downScaleForMax));
+
+        let cw = fabricCanvas.getWidth();
+        let ch = fabricCanvas.getHeight();
+
+        if (resize) {
+          // If the (possibly downscaled) image is smaller than minimum, do
+          // not shrink the canvas; leave the canvas size as-is and show an
+          // "incomplete" background anchored at top-left. Otherwise resize
+          // the canvas to the image size.
+          if (iw < MIN_W || ih < MIN_H) {
+            console.log('changeBackgroundImage: image smaller than minimum; skipping canvas shrink');
+            // keep canvas size; cw/ch remain current
+          } else {
+            try {
+              fabricCanvas.setWidth(iw);
+              fabricCanvas.setHeight(ih);
+              if (canvasEl) {
+                canvasEl.width = iw;
+                canvasEl.height = ih;
+                // also update style so layout uses the new size
+                canvasEl.style.width = `${iw}px`;
+                canvasEl.style.height = `${ih}px`;
+              }
+              cw = iw;
+              ch = ih;
+            } catch (e) {
+              console.warn('changeBackgroundImage: failed to resize canvas', e);
+            }
+          }
+        }
+
+        // Determine background image scale. If we've resized the canvas to
+        // match the image, draw it at 1:1 (or at the precomputed downscale).
+        if (resize && iw >= MIN_W && ih >= MIN_H) {
+          // Image (possibly downscaled to fit MAX) is used 1:1 as canvas
+          // size. Compute the effective scale relative to the original raw
+          // image so the Fabric image renders at the expected size.
+          const effectiveScale = downScaleForMax;
+          bg.set({ scaleX: effectiveScale, scaleY: effectiveScale });
+        } else {
+          // Not resizing canvas: contain-fit the (possibly downscaled)
+          // image inside the current canvas
+          const scale = Math.min(cw / iw, ch / ih);
+          bg.set({ scaleX: scale, scaleY: scale });
+        }
+
+        // Prefer the convenience API if present (different Fabric builds expose it differently)
+        if (typeof fabricCanvas.setBackgroundImage === 'function') {
+            console.log("Using setBackgroundImage API");
+          // Pass width/height so Fabric can position/scale the background consistently
+          fabricCanvas.setBackgroundImage(
+            bg,
+            () => fabricCanvas.requestRenderAll(),
+            {
+              originX: 'left',
+              originY: 'top',
+              left: 0,
+              top: 0,
+              // when resized we want the background to match pixel size; when
+              // not resized we give the canvas size so Fabric can compute
+              // consistent placement.
+              width: cw,
+              height: ch,
+            },
+          );
+        } else {
+            console.log("Using fallback backgroundImage assignment");
+          // Fallback: directly set the property and request a render
+          bg.set({ left: 0, top: 0, originX: 'left', originY: 'top' });
+          fabricCanvas.backgroundImage = bg;
+          fabricCanvas.requestRenderAll();
+        }
+
+      } catch (err) {
+        console.error('changeBackgroundImage: failed to set background', err);
+      }
+    };
+    imgEl.onerror = (err) => {
+      console.error('changeBackgroundImage: failed to load image', imagePath, err);
+    };
+    imgEl.src = imagePath;
   }
 
-  function sendToBack() {
-    const obj = fabricCanvas.getActiveObject();
-    if (obj) {
-      obj.sendToBack();
+    function clearCanvas() {
+        fabricCanvas.clear();
+        // fabricCanvas.setBackgroundColor('#ffffff', () => {
+        fabricCanvas.requestRenderAll();
+        // });
+        selectedExists = false;
+    }
+
+  async function exportAsPDF() {
+    if (!canvasEl) {
+      console.warn('exportAsPDF: canvas element not found');
+      return;
+    }
+
+    try {
+      // ensure canvas render is up-to-date
       fabricCanvas.requestRenderAll();
+
+      // get image data from the canvas
+      const dataUrl = canvasEl.toDataURL('image/png');
+
+      // Create a jsPDF instance sized to the canvas aspect ratio.
+      // We'll use points (pt) units where 1 pt = 1/72 inch. jsPDF supports
+      // 'px' unit in some builds but to be robust we'll compute A4 fallback
+      // sizing while preserving aspect.
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+      });
+
+      const cw = canvasEl.width || canvasEl.clientWidth || img.width;
+      const ch = canvasEl.height || canvasEl.clientHeight || img.height;
+
+      // Dynamically obtain jsPDF (avoid build-time peer dep issues).
+      let jsPDFModule = null;
+      try {
+        jsPDFModule = await import('jspdf');
+      } catch (e) {
+        // If dynamic import fails (package not installed), attempt to load
+        // the UMD build from jsDelivr and read window.jspdf
+        await new Promise((resolve, reject) => {
+          const existing = document.getElementById('jspdf-cdn');
+          if (existing && window.jspdf) return resolve();
+          const s = document.createElement('script');
+          s.id = 'jspdf-cdn';
+          s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+          s.onload = () => resolve();
+          s.onerror = (err) => reject(err);
+          document.head.appendChild(s);
+        }).catch((err) => {
+          console.warn('Could not load jsPDF dynamically, will fallback to image open', err);
+        });
+        jsPDFModule = window.jspdf ? window.jspdf : null;
+      }
+
+      if (!jsPDFModule) {
+        throw new Error('jsPDF not available');
+      }
+
+      const jsPDFCtor = jsPDFModule.jsPDF || jsPDFModule.default || jsPDFModule;
+
+      // Use jsPDF with 'portrait' or 'landscape' based on wider dimension
+      const orientation = cw > ch ? 'landscape' : 'portrait';
+      // Use mm units for more precise control
+      const pdf = new jsPDFCtor({ orientation, unit: 'mm', format: 'a4' });
+
+      // A4 dimensions in mm
+      const A4_W = orientation === 'portrait' ? 210 : 297;
+      const A4_H = orientation === 'portrait' ? 297 : 210;
+
+      // Compute image size to fit A4 while preserving aspect ratio
+      const scale = Math.min(A4_W / cw, A4_H / ch);
+      const imgW = cw * scale;
+      const imgH = ch * scale;
+      const marginX = (A4_W - imgW) / 2;
+      const marginY = (A4_H - imgH) / 2;
+
+      // add image to PDF
+      pdf.addImage(dataUrl, 'PNG', marginX, marginY, imgW, imgH);
+
+      // trigger download
+      pdf.save('canvas-export.pdf');
+    } catch (err) {
+      console.error('exportAsPDF failed:', err);
+      // fallback: open image in new tab
+      try {
+        const dataUrl = canvasEl.toDataURL('image/png');
+        const w = window.open('about:blank');
+        if (w) w.document.write(`<img src="${dataUrl}" alt="canvas"/>`);
+      } catch (err2) {
+        console.error('fallback open image failed', err2);
+      }
     }
   }
 
   function bringForward() {
     const obj = fabricCanvas.getActiveObject();
-    if (obj) {
-      obj.bringForward();
+    console.log("bringForward obj:", obj);
+    if (!obj) return;
+    try {
+      const objs = fabricCanvas.getObjects();
+      console.log('bring forward index:', objs.indexOf(obj));
+      console.log('bring forward stack order:', objs.map((o,i)=>({i,type:o.type, id:o?.id})));
+
+      // If ActiveSelection, move each member; otherwise move single object
+      const members = (obj.type === 'activeSelection' && obj._objects) ? obj._objects.slice() : [obj];
+      for (const o of members) {
+        const idx = objs.indexOf(o);
+        if (idx >= 0) {
+          objs.splice(idx, 1);
+          objs.push(o); // put at the end (top of visual stack)
+        }
+      }
+
+      // Apply back to internal array (hacky but requested)
+      try {
+        fabricCanvas._objects = objs;
+      } catch (e) {
+        // Some Fabric builds may not allow direct assignment; try clearing and re-adding
+        try {
+          fabricCanvas.clear();
+          for (const o of objs) fabricCanvas.add(o);
+        } catch (e2) {
+          console.warn('bringForward: failed to apply manual reorder', e2);
+        }
+      }
+
+      // Update coords and render
+      try { members.forEach(m => m.setCoords && m.setCoords()); } catch(e) {}
       fabricCanvas.requestRenderAll();
+    } catch (err) {
+      console.error('bringForward error:', err);
     }
   }
 
   function sendBackwards() {
     const obj = fabricCanvas.getActiveObject();
-    if (obj) {
-      obj.sendBackwards();
-      fabricCanvas.requestRenderAll();
-    }
-  }
-
-  function duplicateObject() {
-    const obj = fabricCanvas.getActiveObject();
+    console.log("sendBackwards obj:", obj);
     if (!obj) return;
-    obj.clone((cloned) => {
-      cloned.set({ left: obj.left + 20, top: obj.top + 20 });
-      fabricCanvas.add(cloned);
-      fabricCanvas.setActiveObject(cloned);
+    try {
+      const objs = fabricCanvas.getObjects();
+      console.log('sendBackwards index:', objs.indexOf(obj));
+      console.log('sendBackwards stack order:', objs.map((o,i)=>({i,type:o.type, id:o?.id})));
+
+      const members = (obj.type === 'activeSelection' && obj._objects) ? obj._objects.slice() : [obj];
+      for (const o of members) {
+        const idx = objs.indexOf(o);
+        if (idx >= 0) {
+          objs.splice(idx, 1);
+          objs.unshift(o); // put at the front (bottom of visual stack)
+        }
+      }
+
+      try {
+        fabricCanvas._objects = objs;
+      } catch (e) {
+        try {
+          fabricCanvas.clear();
+          for (const o of objs) fabricCanvas.add(o);
+        } catch (e2) {
+          console.warn('sendBackwards: failed to apply manual reorder', e2);
+        }
+      }
+
+      try { members.forEach(m => m.setCoords && m.setCoords()); } catch(e) {}
+      // After sending objects to the back, clear the active selection so
+      // the moved object doesn't remain selected (which in some builds
+      // can cause it to be visually promoted again).
+      try {
+        if (fabricCanvas.discardActiveObject) {
+          fabricCanvas.discardActiveObject();
+        } else if (fabricCanvas.setActiveObject) {
+          fabricCanvas.setActiveObject(null);
+        }
+      } catch (e) {
+        console.warn('sendBackwards: failed to clear active object', e);
+      }
+      // Keep toolbar state in sync
+      selectedExists = false;
       fabricCanvas.requestRenderAll();
-    });
+    } catch (err) {
+      console.error('sendBackwards error:', err);
+    }
   }
 
   function deleteActive() {
@@ -346,8 +641,8 @@
       loading = false;
     }
   }
-  let canvasWidth = 1400;
-  let canvasHeight = 1200;
+  let canvasWidth = 800;
+  let canvasHeight = 600;
   onMount(() => {
     fabricCanvas = new Canvas(canvasEl, {
       width: canvasWidth,
@@ -355,7 +650,15 @@
       backgroundColor: "transparent",
     });
 
+    // ensure Fabric has correct offsets and is fully rendered
+    try { fabricCanvas.calcOffset && fabricCanvas.calcOffset(); } catch(e) {}
     fabricCanvas.renderAll();
+
+    // console.log('Fabric canvas initialized', fabricCanvas);
+    // console.log("front method: ", fabricCanvas.sendObjectToBack);
+
+    // console.log('Fabric canvas initialized', fabricCanvas);
+    // console.log("front method: ", fabricCanvas.sendObjectToBack);
 
     // initial load
     loadImages();
@@ -365,6 +668,10 @@
       // whenever the counter increments, reload images
       loadImages();
     });
+
+    // images/sam_shapes/IMG_0430_L/mask_002_rgba.png
+
+    // changeBackgroundImage('../../backend/images/sam_shapes/text_boxes.png', true);
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -378,27 +685,42 @@
     // Manage selection state and optionally bring a clicked object to front
     fabricCanvas.on("selection:created", (e) => {
       const obj = e.target;
-      selectedExists = !!obj;
-      if (obj) {
-        fabricCanvas.requestRenderAll();
+      selectedExists = true;
+      try {
+        console.log('selection:created target:', obj);
+        if (obj) {
+          // ensure coords are up-to-date
+          obj.setCoords && obj.setCoords();
+          const rect = obj.getBoundingRect(true);
+          console.log('boundingRect (contain=true):', rect);
+          console.log('scaled size:', obj.getScaledWidth && obj.getScaledWidth(), obj.getScaledHeight && obj.getScaledHeight());
+        }
+      } catch (err) {
+        console.warn('selection:created diagnostics failed', err);
       }
+      fabricCanvas.requestRenderAll();
     });
 
     fabricCanvas.on("selection:updated", (e) => {
       const obj = e.target;
-      selectedExists = !!obj;
-      if (obj) {
-        fabricCanvas.requestRenderAll();
+      selectedExists = true;
+      try {
+        console.log('selection:updated target:', obj);
+        if (obj) {
+          obj.setCoords && obj.setCoords();
+          const rect = obj.getBoundingRect(true);
+          console.log('boundingRect (contain=true):', rect);
+          console.log('scaled size:', obj.getScaledWidth && obj.getScaledWidth(), obj.getScaledHeight && obj.getScaledHeight());
+        }
+      } catch (err) {
+        console.warn('selection:updated diagnostics failed', err);
       }
+      fabricCanvas.requestRenderAll();
     });
 
     fabricCanvas.on("selection:cleared", () => {
       selectedExists = false;
     });
-
-    return () => {
-      if (_refreshUnsub) _refreshUnsub();
-    };
   });
 </script>
 
@@ -467,8 +789,7 @@
       <button
         class="tool-btn"
         type="button"
-        on:click={bringToFront}
-        disabled={!selectedExists}>
+        on:click={bringForward}>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <title>Bring to front</title>
           <rect x="3.5" y="8.5" width="9" height="6" rx="1" transform="rotate(-6 3.5 8.5)" />
@@ -482,36 +803,7 @@
       <button
         class="tool-btn"
         type="button"
-        on:click={sendToBack}
-        disabled={!selectedExists}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <title>Send to back</title>
-          <rect x="9" y="1.5" width="9" height="6" rx="1" />
-          <rect x="6" y="5" width="9" height="6" rx="1" transform="rotate(3 6 5)" />
-          <rect x="3.5" y="8.5" width="9" height="6" rx="1" transform="rotate(6 3.5 8.5)" />
-          <path d="M17 2v6" />
-          <path d="M14 9l3 3 3-3" transform="translate(-3 -1) scale(.67)"/>
-        </svg>
-        Send to back
-      </button>
-      <!-- <button
-        class="tool-btn"
-        type="button"
-        on:click={bringForward}
-        disabled={!selectedExists}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <title>Bring forward</title>
-          <rect x="4" y="6" width="12" height="10" rx="1" />
-          <path d="M19 17v-4" />
-          <path d="M16 10l3-3 3 3" transform="translate(-5 3) scale(.6)"/>
-        </svg>
-        Bring forward
-      </button> -->
-      <button
-        class="tool-btn"
-        type="button"
-        on:click={sendBackwards}
-        disabled={!selectedExists}>
+        on:click={sendBackwards}>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <title>Send back</title>
           <rect x="4" y="6" width="12" height="10" rx="1" />
@@ -519,24 +811,11 @@
           <path d="M16 14l3 3 3-3" transform="translate(-5 -3) scale(.6)"/>
         </svg>
         Send back
-      </button>
+        </button>
       <button
         class="tool-btn"
         type="button"
-        on:click={duplicateObject}
-        disabled={!selectedExists}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <title>Duplicate</title>
-          <rect x="6.5" y="6.5" width="11" height="10" rx="1" transform="translate(1 1)" />
-          <rect x="3" y="3" width="11" height="10" rx="1" />
-        </svg>
-        Duplicate
-      </button>
-      <button
-        class="tool-btn"
-        type="button"
-        on:click={deleteActive}
-        disabled={!selectedExists}>
+        on:click={deleteActive}>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <title>Delete</title>
           <rect x="6" y="7" width="12" height="12" rx="1" />
@@ -546,6 +825,24 @@
           <path d="M14 11v6" />
         </svg>
         Delete
+      </button>
+      <button
+        class="tool-btn"
+        type="button"
+        on:click={exportAsPDF}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Convert to PDF</title>
+        </svg>
+        Convert to PDF
+      </button>
+      <button
+        class="tool-btn"
+        type="button"
+        on:click={clearCanvas}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <title>Clear Canvas</title>
+        </svg>
+        Clear Canvas
       </button>
     </div>
   </div>
@@ -559,8 +856,8 @@
   >
     <canvas
       bind:this={canvasEl}
-      width='${canvasWidth}'
-      height='${canvasHeight}'
+      width={canvasWidth}
+      height={canvasHeight}
       aria-label="Fabric editing canvas"
     ></canvas>
   </div>

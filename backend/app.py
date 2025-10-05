@@ -90,5 +90,19 @@ def list_images():
     # print("Here are the sam_shapes image URLs:", files)
     return jsonify({"images": files})
 
+# @app.route("/all_images", methods=["GET"])
+# def list_images():
+#     # Return only images located under the 'sam_shapes' directory (recursive).
+#     # target_dir = UPLOAD_DIR / "sam_shapes"
+#     files = []
+#     # for f in "/images/":
+#     #     if f.is_file() and allowed_file(f.name):
+#     #         rel = f.relative_to(UPLOAD_DIR).as_posix()
+#     #         files.append(f"/images/{rel}")
+#     files.append(f"/images/green_check.png")
+#     files.append(f"/images/mask_007_rgba.png")
+#     # print("Here are the sam_shapes image URLs:", files)
+#     return jsonify({"images": files})
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5054)
