@@ -125,19 +125,23 @@
     text-align: left;
   }
   .folder:hover { background: rgba(0,0,0,0.03); }
-  .files { margin-left: 16px; }
-   .files {
+  
+.files:has(.file-entry) {
     display: flex;
     align-content: flex-start;
     flex-wrap: wrap;
     flex-direction: row;
-  }
+    max-height: 300px;
+    overflow-y: auto;
+}
+.files { margin-left: 16px; }
   .file-entry {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 4px 6px;
     border-radius: 4px;
+    background: var(--gb-panel);
   }
   .file-entry:hover { background: rgba(0,0,0,0.02); }
   .thumb { width: 48px; height: auto; border: 1px solid #ddd; }

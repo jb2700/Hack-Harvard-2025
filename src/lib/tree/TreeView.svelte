@@ -44,7 +44,11 @@
 </script>
 
 <style>
-  .tree { padding: 6px; font-family: system-ui; font-size: 13px; }
+  .tree { 
+    padding: 6px; 
+    font-family: system-ui; 
+    max-height: 70vh;
+    font-size: 13px; }
 </style>
 
 <div class="tree" role="tree">
