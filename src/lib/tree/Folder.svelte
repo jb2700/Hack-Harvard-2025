@@ -21,55 +21,59 @@
     dispatch('drag', { event: e, item });
   }
 
-  async function buildComposite() {
-    if (compositeCache) return compositeCache;
-    try {
-      // compute bounding box of all items to know composite size
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const f of node.files) {
-        const b = f.bbox || { x:0,y:0,width:f.naturalWidth||1, height:f.naturalHeight||1 };
-        minX = Math.min(minX, b.x);
-        minY = Math.min(minY, b.y);
-        maxX = Math.max(maxX, b.x + b.width);
-        maxY = Math.max(maxY, b.y + b.height);
-      }
-      if (!isFinite(minX)) {
-        minX = 0; minY = 0; maxX = 64; maxY = 64;
-      }
-      const cw = Math.max(1, Math.ceil(maxX - minX));
-      const ch = Math.max(1, Math.ceil(maxY - minY));
-
-      const maxSide = 200;
-      const scale = Math.min(1, maxSide / Math.max(cw, ch));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(cw * scale));
-      canvas.height = Math.max(1, Math.round(ch * scale));
-      const ctx = canvas.getContext('2d');
-
-      for (const f of node.files) {
-        try {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = f.thumb || f.url;
-          await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
-          const b = f.bbox || { x:0,y:0,width:img.naturalWidth, height:img.naturalHeight };
-          const dx = (b.x - minX) * scale;
-          const dy = (b.y - minY) * scale;
-          const dw = Math.max(1, Math.round(b.width * scale));
-          const dh = Math.max(1, Math.round(b.height * scale));
-          ctx.drawImage(img, 0, 0, img.naturalWidth || dw, img.naturalHeight || dh, dx, dy, dw, dh);
-        } catch (inner) {
-          // ignore individual failures
-        }
-      }
-
-      compositeCache = canvas.toDataURL('image/png');
-      return compositeCache;
-    } catch (err) {
-      console.warn('buildComposite failed', err);
-      return null;
+async function buildComposite() {
+  if (compositeCache) return compositeCache;
+  
+  try {
+    // Load all images first to get actual dimensions
+    const loadedImages = [];
+    for (const f of node.files) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = f.thumb || f.url;
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+      
+      // Ensure bbox has actual image dimensions
+      f.bbox = f.bbox || { x: 0, y: 0, width: img.naturaWidth, height: img.naturalHeight };
+      loadedImages.push({ file: f, img });
     }
+    
+    // Calculate bounding box
+    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+    if (loadedImages.length > 0) {
+      minX = Math.min(...loadedImages.map(({file: f}) => f.bbox.x));
+      minY = Math.min(...loadedImages.map(({file: f}) => f.bbox.y));
+      maxX = Math.max(...loadedImages.map(({file: f}) => f.bbox.x + f.bbox.width));
+      maxY = Math.max(...loadedImages.map(({file: f}) => f.bbox.y + f.bbox.height));
+    }
+    
+    const cw = Math.max(1, maxX - minX);
+    const ch = Math.max(1, maxY - minY);
+    const scale = Math.min(1, 200 / Math.max(cw, ch));
+    
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(cw * scale);
+    canvas.height = Math.round(ch * scale);
+    const ctx = canvas.getContext('2d');
+    
+    // Draw all images
+    for (const {file: f, img} of loadedImages) {
+      const b = f.bbox;
+      const dx = (b.x - minX) * scale;
+      const dy = (b.y - minY) * scale;
+      const dw = b.width * scale;
+      const dh = b.height * scale;
+      ctx.drawImage(img, dx, dy, dw, dh);
+    }
+    
+    compositeCache = canvas.toDataURL('image/png');
+    return compositeCache;
+  } catch (err) {
+    console.warn('buildComposite failed', err);
+    return null;
   }
+}
 
   // create drag payload and set drag image
   async function onFolderDragStart(e) {
@@ -79,6 +83,7 @@
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const f of node.files) {
         const b = f.bbox || { x:0,y:0,width:f.naturalWidth||1, height:f.naturalHeight||1 };
+        console.log('bbox for file', f.name, b);
         minX = Math.min(minX, b.x);
         minY = Math.min(minY, b.y);
         maxX = Math.max(maxX, b.x + b.width);

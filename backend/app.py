@@ -80,7 +80,6 @@ def serve_rgba(filename):
 
 @app.route("/all_images", methods=["GET"])
 def list_images():
-    # Return only images located under the 'sam_shapes' directory (recursive).
     target_dir = UPLOAD_DIR / "sam_shapes"
     files = []
     for f in target_dir.rglob("*"):

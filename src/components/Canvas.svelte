@@ -6,17 +6,8 @@
   import Upload from "./Upload.svelte";
 
   let canvasEl;
-  let fabricCanvas;
-
-  // small incrementing id for objects so stack logs are useful
-  let _nextObjectId = 1;
-
-  // track whether an object is selected (for enabling toolbar buttons)
   let selectedExists = false;
-  // when true, the next canvas click will convert the clicked object to the background
   let makeBgMode = false;
-
-  // List of image URLs (returned from your backend)
   let images = [];
   let loading = true;
   let loadError = null;
@@ -45,7 +36,6 @@
 
         // assign a simple id so debugging / stack prints show something meaningful
         try {
-          const assignedId = `img-${_nextObjectId++}`;
           // store on the object and in its properties for serialization
           fImg.set && fImg.set({ id: assignedId });
           fImg.id = assignedId;
@@ -85,59 +75,47 @@
     imgEl.src = url;
   }
 
-  // Note: thumbnail click/drag helpers were removed in favor of TreeView/Folder drag handlers.
-
   function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     console.log('handleDragOver', e);
   }
-  function handleDrop(e) {
-    e.preventDefault();
 
-    // compute pointer in canvas coords
-    // let pointer;
-    // try {
-    //   pointer = fabricCanvas.getPointer(e);
-    // } catch (err) {
-      const rect = canvasEl.getBoundingClientRect();
-      let pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    // }
-
-    // If a folder composite drag was started, the Folder component stored the structured payload
-    // in a temporary global `window.__folderDragPayload` (set by onTreeDrag when the TreeView forwarded the folder drag).
-    const folderPayload = window.__folderDragPayload || null;
-    if (folderPayload && folderPayload.items && folderPayload.items.length) {
-      const scale = folderPayload.scale || 1;
-      const baseX = pointer.x;
-      const baseY = pointer.y;
-      // Place each child at relative position: pointer + (child.bbox - folder.bbox) * scale
-      for (const child of folderPayload.items) {
-        const cb = child.bbox || { x: 0, y: 0 };
-        const fx = baseX + ((cb.x || 0) - (folderPayload.bbox?.x || 0)) * scale;
-        const fy = baseY + ((cb.y || 0) - (folderPayload.bbox?.y || 0)) * scale;
-        // child.url is expected to be the cropped full-resolution data URL
-        addImageToCanvas(child.url, { left: fx, top: fy, scale });
-      }
-      // clear the temporary payload
-      window.__folderDragPayload = null;
-      return;
+function handleDrop(e) {
+  e.preventDefault();
+  const rect = canvasEl.getBoundingClientRect();
+  let pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const folderPayload = window.__folderDragPayload || null;
+  if (folderPayload && folderPayload.items && folderPayload.items.length) {
+    const scale = folderPayload.scale || 1;
+    const baseX = pointer.x;
+    const baseY = pointer.y;
+    
+    for (const child of folderPayload.items) {
+      const cb = child.bbox || { x: 0, y: 0 };
+      // Divide by scale to restore original relative positioning
+      const fx = baseX + ((cb.x || 0) - (folderPayload.bbox?.x || 0)) * scale;
+      const fy = baseY + ((cb.y || 0) - (folderPayload.bbox?.y || 0)) * scale;
+      addImageToCanvas(child.url, { left: fx, top: fy, scale: 1 });
     }
-
-    // Fallback: single-image drop
-    const url =
-      e.dataTransfer.getData("text/plain") ||
-      e.dataTransfer.getData("text/uri-list");
-    if (!url) return;
-    let thumbSize = null;
-    try {
-      const raw = e.dataTransfer.getData("application/thumb-size");
-      if (raw) thumbSize = JSON.parse(raw);
-    } catch (err) {
-      /* ignore */
-    }
-    addImageToCanvas(url, { left: pointer.x, top: pointer.y, thumbSize });
+    window.__folderDragPayload = null;
+    return;
   }
+  
+  // Otherwise, single image drop
+  const url = e.dataTransfer.getData("text/plain") || e.dataTransfer.getData("text/uri-list");
+  if (!url) return;
+  
+  let thumbSize = null;
+  try {
+    const raw = e.dataTransfer.getData("application/thumb-size");
+    if (raw) thumbSize = JSON.parse(raw);
+  } catch (err) {
+    /* ignore */
+  }
+  
+  addImageToCanvas(url, { left: pointer.x, top: pointer.y, thumbSize });
+}
 
     function changeBackgroundImage(imagePath, resize = false) {
     // imagePath: string (URL or relative path).
@@ -656,19 +634,9 @@
   function onTreeDrag(e) {
     // e.detail.event is the original dragstart event
     const { event, item } = e.detail;
-    // prepare dataTransfer similarly to handleDragStart
     try {
       if (item && item.type === "folder") {
-        // stash the full folder payload for the eventual drop
         window.__folderDragPayload = item;
-        // attach a minimal text fallback
-        try {
-          event.dataTransfer.setData(
-            "text/plain",
-            JSON.stringify({ type: "folder", name: item.name }),
-          );
-        } catch (_) {}
-        // the Folder component already set application/folder-composite and drag image
       } else {
         const url = item.url;
         event.dataTransfer.setData("text/plain", url);
